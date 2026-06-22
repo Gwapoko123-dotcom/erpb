@@ -2117,7 +2117,241 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     </div>
   </div>
 </div>
-      <div id="page-quotation" class="page"><div class="placeholder-card"><h2>QUOTATION</h2><p>Create and manage client quotations.</p></div></div>
+      <!-- ══════════════════════════════════════════════════════════
+           QUOTATION PAGE
+      ══════════════════════════════════════════════════════════ -->
+      <div id="page-quotation" class="page">
+        <div class="page-heading">QUOTATION <span>BUILDER</span></div>
+
+        <!-- Stat cards -->
+        <div class="stats-row" style="margin-bottom:20px;">
+          <div class="stat-card">
+            <div class="stat-card-label">Total Quotations</div>
+            <div class="stat-card-val neutral" id="qt-stat-count">0</div>
+            <div class="stat-card-sub">All time issued</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Pending Approval</div>
+            <div class="stat-card-val neutral" id="qt-stat-pending" style="color:var(--text);">0</div>
+            <div class="stat-card-sub">Awaiting client decision</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Approved / Won</div>
+            <div class="stat-card-val" id="qt-stat-approved">0</div>
+            <div class="stat-card-sub">Converted to sale</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Total Quoted Value</div>
+            <div class="stat-card-val" id="qt-stat-value">₱0.00</div>
+            <div class="stat-card-sub">Sum of all active quotes</div>
+          </div>
+        </div>
+
+        <div class="placeholder-card" style="padding:24px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="font-size:1.1rem; letter-spacing:0.05em; margin-bottom:4px;">QUOTATION REGISTRY</h2>
+              <p style="font-size:0.78rem; color:var(--text-muted);">Create, send, and track client quotations</p>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <div class="field" style="width:240px; margin:0;">
+                <input type="text" id="qt-search-input" placeholder="🔍 Filter by client, ID, status…" oninput="filterQuotationTable()" style="padding:8px 12px; font-size:0.8rem;"/>
+              </div>
+              <button class="qa-btn" onclick="openNewQuotationModal()" style="padding:8px 18px; background:var(--red); color:#fff; border-color:var(--red); font-size:0.72rem; white-space:nowrap;">+ New Quotation</button>
+            </div>
+          </div>
+
+          <div class="t-wrap" style="border:1px solid var(--border2);">
+            <table class="htable" id="qt-log-table">
+              <thead style="background:var(--bg3);">
+                <tr>
+                  <th style="padding:12px 14px;">Quote ID</th>
+                  <th style="padding:12px 14px;">Date Issued</th>
+                  <th style="padding:12px 14px;">Client Name</th>
+                  <th style="padding:12px 14px;">Prepared By</th>
+                  <th style="padding:12px 14px;">Valid Until</th>
+                  <th style="padding:12px 14px; text-align:right;">Total Amount</th>
+                  <th style="padding:12px 14px; text-align:center;">Status</th>
+                  <th style="padding:12px 14px; text-align:center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="qt-log-tbody">
+                <tr><td colspan="8" style="text-align:center; padding:32px; font-family:var(--mono); color:var(--text-muted);">◇<br><br>LOADING QUOTATION RECORDS…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="qt-log-empty" style="display:none; text-align:center; padding:48px; font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border2); border-top:none; background:var(--card);">
+            ◇<br><br>NO QUOTATIONS FOUND — CLICK "+ NEW QUOTATION" TO CREATE ONE
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--border2);">
+            <button class="qa-btn" id="qt-prev-btn" onclick="paginateQuotationsBackward()" disabled style="padding:6px 14px; opacity:0.4;">➔ First Page / Reset</button>
+            <span style="font-family:var(--mono); font-size:0.7rem; color:var(--text-muted);" id="qt-page-indicator">LIMIT CHUNK: DYNAMIC REGISTERS</span>
+            <button class="qa-btn" id="qt-next-btn" onclick="paginateQuotationsForward()" disabled style="padding:6px 14px;">Next 20 Rows ➔</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ NEW / EDIT QUOTATION MODAL ══ -->
+      <div id="modal-quotation" class="modal-overlay" onclick="if(event.target===this)closeQuotationModal()">
+        <div class="modal-card modal-xl" style="max-width:860px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            <span id="qt-modal-title">New Quotation</span>
+            <button class="modal-close" onclick="closeQuotationModal()">✕</button>
+          </div>
+
+          <!-- Client & Meta -->
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">
+            <div class="field">
+              <label>Client / Company Name *</label>
+              <input type="text" id="qt-client" placeholder="e.g. ABC Corporation"/>
+            </div>
+            <div class="field">
+              <label>Contact Person</label>
+              <input type="text" id="qt-contact" placeholder="e.g. Juan dela Cruz"/>
+            </div>
+            <div class="field">
+              <label>Contact Email</label>
+              <input type="email" id="qt-email" placeholder="client@email.com"/>
+            </div>
+            <div class="field">
+              <label>Valid Until *</label>
+              <input type="date" id="qt-valid-until"/>
+            </div>
+            <div class="field">
+              <label>Payment Terms</label>
+              <select id="qt-payment-terms">
+                <option value="Cash">Cash</option>
+                <option value="Net 7">Net 7</option>
+                <option value="Net 15">Net 15</option>
+                <option value="Net 30">Net 30</option>
+                <option value="Net 60">Net 60</option>
+                <option value="50% DP">50% Down Payment</option>
+                <option value="Custom">Custom</option>
+              </select>
+            </div>
+
+          </div>
+
+          <!-- Add Item Row -->
+          <div style="background:var(--bg3); border:1px solid var(--border2); padding:14px; margin-bottom:12px;">
+            <div style="font-family:var(--mono); font-size:0.62rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px;">Add Line Item</div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+              <div class="field" style="flex:2; min-width:180px; margin:0;">
+                <label style="font-size:0.7rem;">Product / Service</label>
+                <select id="qt-add-product" onchange="qtProductSelected()" style="font-size:0.82rem;">
+                  <option value="">— Select from inventory —</option>
+                </select>
+              </div>
+              <div class="field" style="width:90px; margin:0;">
+                <label style="font-size:0.7rem;">Qty</label>
+                <input type="number" id="qt-add-qty" value="1" min="1" style="font-size:0.82rem;" oninput="qtUpdateAddUnitPrice()"/>
+              </div>
+              <div class="field" style="width:130px; margin:0;">
+                <label style="font-size:0.7rem;">Unit Price (₱)</label>
+                <input type="number" id="qt-add-price" value="0" min="0" step="0.01" style="font-size:0.82rem;"/>
+              </div>
+              <div class="field" style="flex:1; min-width:140px; margin:0;">
+                <label style="font-size:0.7rem;">Description (optional)</label>
+                <input type="text" id="qt-add-desc" placeholder="Custom note…" style="font-size:0.82rem;"/>
+              </div>
+              <button class="qa-btn" onclick="qtAddLineItem()" style="padding:8px 16px; white-space:nowrap; flex-shrink:0;">+ Add</button>
+            </div>
+            <div style="margin-top:5px;"><span id="qt-stock-hint" style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.05em;"></span></div>
+            <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+              <span style="font-family:var(--mono); font-size:0.6rem; color:var(--text-muted);">OR ADD FREE-TEXT:</span>
+              <input type="text" id="qt-add-freetext-name" placeholder="Item / service name" style="flex:2; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <input type="number" id="qt-add-freetext-qty" value="1" min="1" style="width:60px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <input type="number" id="qt-add-freetext-price" value="0" min="0" step="0.01" placeholder="Price" style="width:110px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <button class="qa-btn" onclick="qtAddFreeTextItem()" style="padding:5px 12px; font-size:0.7rem;">+ Add</button>
+            </div>
+          </div>
+
+          <!-- Line Items Table -->
+          <div class="t-wrap" style="border:1px solid var(--border2); margin-bottom:12px; min-height:80px;">
+            <table class="htable" id="qt-items-table">
+              <thead style="background:var(--bg3);">
+                <tr>
+                  <th style="padding:10px 12px;">#</th>
+                  <th style="padding:10px 12px;">Item</th>
+                  <th style="padding:10px 12px;">Description</th>
+                  <th style="padding:10px 12px; text-align:right; width:60px;">Qty</th>
+                  <th style="padding:10px 12px; text-align:right; width:120px;">Unit Price</th>
+                  <th style="padding:10px 12px; text-align:right; width:120px;">Line Total</th>
+                  <th style="padding:10px 12px; text-align:center; width:60px;">Del</th>
+                </tr>
+              </thead>
+              <tbody id="qt-items-tbody">
+                <tr id="qt-empty-row"><td colspan="7" style="text-align:center; padding:24px; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted);">No items added yet — use the form above</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Totals + Notes -->
+          <div style="display:grid; grid-template-columns:1fr 280px; gap:16px; margin-bottom:16px;">
+            <div class="field">
+              <label>Internal Notes / Remarks</label>
+              <textarea id="qt-notes" rows="3" placeholder="e.g. Delivery included, installation within 2 weeks…" style="width:100%; background:var(--bg3); border:1px solid var(--border2); padding:10px 12px; color:var(--text); font-size:0.84rem; outline:none; resize:vertical; border-radius:0;" onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'"></textarea>
+            </div>
+            <div style="background:var(--bg3); border:1px solid var(--border2); padding:16px; font-family:var(--mono); font-size:0.82rem;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:8px; color:var(--text-muted);">
+                <span>Subtotal</span><span id="qt-subtotal-display">₱0.00</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; color:var(--text-muted);">
+                <span>Discount</span>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input type="number" id="qt-discount" value="0" min="0" step="0.01" oninput="qtRecalcTotals()" style="width:70px; background:var(--bg); border:1px solid var(--border2); padding:3px 6px; color:var(--text); font-size:0.78rem; outline:none; text-align:right;"/>
+                  <select id="qt-discount-type" onchange="qtRecalcTotals()" style="background:var(--bg); border:1px solid var(--border2); padding:3px 6px; color:var(--text); font-size:0.72rem; outline:none;">
+                    <option value="fixed">₱ Fixed</option>
+                    <option value="percent">% Pct</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; color:var(--text-muted);">
+                <span>VAT (12%)</span>
+                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                  <input type="checkbox" id="qt-vat-toggle" onchange="qtRecalcTotals()" style="accent-color:var(--red);"/>
+                  <span id="qt-vat-display">₱0.00</span>
+                </label>
+              </div>
+              <div style="height:1px; background:var(--border2); margin:10px 0;"></div>
+              <div style="display:flex; justify-content:space-between; font-size:1rem; font-weight:700; color:var(--text);">
+                <span>TOTAL</span><span id="qt-total-display" style="color:var(--green);">₱0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-red" onclick="saveQuotation('draft')" style="flex:1; min-width:130px;">Save as Draft</button>
+            <button class="btn btn-red" onclick="saveQuotation('pending')" style="flex:1; min-width:130px; background:#1565c0; border-color:#1565c0;">Send to Client</button>
+            <button class="qa-btn" onclick="printQuotation()" style="padding:10px 18px; flex-shrink:0;">🖨 Preview / Print</button>
+            <button class="btn btn-ghost" onclick="closeQuotationModal()" style="width:120px; margin:0;">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ QUOTATION DETAIL / VIEW MODAL ══ -->
+      <div id="modal-qt-view" class="modal-overlay" onclick="if(event.target===this)closeQuotationViewModal()">
+        <div class="modal-card modal-xl" style="max-width:760px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            Quotation <span id="qt-view-id" style="color:var(--red);"></span>
+            <button class="modal-close" onclick="closeQuotationViewModal()">✕</button>
+          </div>
+          <div id="qt-view-body" style="font-size:0.84rem;"></div>
+          <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+            <button class="btn btn-red" id="qt-view-approve-btn" onclick="changeQuotationStatus('approved')" style="flex:1; min-width:130px;">✔ Mark Approved</button>
+            <button class="qa-btn" id="qt-view-reject-btn" onclick="changeQuotationStatus('rejected')" style="padding:10px 18px; flex-shrink:0; color:var(--red);">✘ Mark Rejected</button>
+            <button class="qa-btn" id="qt-view-void-btn" onclick="voidQuotation()" style="padding:10px 18px; flex-shrink:0; color:#9c27b0; border-color:#9c27b0; display:none;">⊘ Void</button>
+            <button class="qa-btn" id="qt-view-edit-btn" onclick="editCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">✎ Edit</button>
+            <button class="qa-btn" onclick="printCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">🖨 Print</button>
+            <button class="btn btn-ghost" onclick="closeQuotationViewModal()" style="width:100px; margin:0;">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ QUOTATION PRINT TEMPLATE (hidden) ══ -->
+      <div id="qt-print-area" style="display:none;"></div>
       <div id="page-leads" class="page"><div class="placeholder-card"><h2>LEADS</h2><p>Track and manage sales leads and prospects.</p></div></div>
       <div id="page-installation" class="page"><div class="placeholder-card"><h2>INSTALLATION LIST</h2><p>Manage installation jobs and assignments.</p></div></div>
 
@@ -3174,11 +3408,13 @@ async function loadStocksFromFirestore(){
     // or you deleted everything on purpose) — the inventory simply starts
     // empty and stays that way until items are added through the UI.
     PRICELIST = snap.docs.map(d => stockDocToItem(d.id, d.data()));
+    window.PRICELIST = PRICELIST;  // expose to quotation engine
     stocksLoaded = true;
   } catch(e){
     console.error('Failed to load stocks from Firestore:', e);
     showToast('⚠ Could not load inventory from database: ' + (e.code || e.message || e), 6000);
     PRICELIST = [];
+    window.PRICELIST = PRICELIST;
   }
 }
 
@@ -4989,6 +5225,7 @@ function showPage(name, el){
   
   if(name === 'sales'){ window.loadGlobalSalesLogPage(); }
   if(name === 'expenses'){ window.loadGlobalExpensesLogPage('init'); }
+  if(name === 'quotation'){ loadQuotationsPage(); }
   if(name === 'branches'){ loadBranches(); }
   if(name === 'payroll'){ initPayrollPage(); }
 }
@@ -5821,14 +6058,19 @@ function closePayslipModal() {
 }
 
 function printPayslip() {
-  const body = document.getElementById('payslip-body').innerHTML;
-  const win = window.open('','_blank','width=600,height=700');
-  win.document.write(`<!DOCTYPE html><html><head><title>Payslip</title>
-    <style>
-      *{box-sizing:border-box;margin:0;padding:0;}
-      body{font-family:'Inter',sans-serif;color:#0d1b2e;padding:32px;font-size:14px;}
-      .p-tag{display:inline-block;padding:2px 6px;border:1px solid #aaa;font-size:11px;}
-    </style></head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`);
+  var body = document.getElementById('payslip-body').innerHTML;
+  var win = window.open('','_blank','width=600,height=700');
+  var css = [
+    '*{box-sizing:border-box;margin:0;padding:0;}',
+    'body{font-family:Inter,sans-serif;color:#0d1b2e;padding:32px;font-size:14px;}',
+    '.p-tag{display:inline-block;padding:2px 6px;border:1px solid #aaa;font-size:11px;}'
+  ].join('');
+  var html = '<!DOCTYPE html><html><head><title>Payslip<\/title>'
+    + '<style>' + css + '<\/style>'
+    + '<\/head><body>' + body
+    + '<script>window.onload=function(){window.print();}<\/scr' + 'ipt>'
+    + '<\/body><\/html>';
+  win.document.write(html);
   win.document.close();
 }
 
@@ -8674,5 +8916,664 @@ document.addEventListener('click', function(e) {
 });
 </script>
 
-</body>
-</html>
+<!-- ═══════════════════════════════════════════════════════════════
+     QUOTATION ENGINE
+═══════════════════════════════════════════════════════════════ -->
+<script>
+// ── State ──
+let QT_ACTIVE_CHUNK = [];
+let qtLastDocRef = null;
+let _qtEditId = null;         // Firestore doc ID being edited (null = new)
+let _qtViewId = null;         // Firestore doc ID currently viewed
+let _qtLineItems = [];        // Working array for the modal builder
+let _qtQuoteCounter = null;   // Next numeric suffix for QT- IDs
+
+const fmtCur = (n) => Number(n||0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+
+// ── Load page ──
+async function loadQuotationsPage() {
+  await loadQuotationsFromFirebase('init');
+}
+
+// ── Paginated Firebase fetch ──
+async function loadQuotationsFromFirebase(direction = 'init') {
+  const tbody = document.getElementById('qt-log-tbody');
+  const emptyState = document.getElementById('qt-log-empty');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;font-family:var(--mono);color:var(--text-muted);">STREAMING QUOTATION RECORDS…</td></tr>`;
+  if (emptyState) emptyState.style.display = 'none';
+
+  try {
+    const fb = window._fb;
+    if (!fb) throw new Error('Firebase not ready');
+    let q = fb.query(fb.collection(fb.db, 'quotations'), fb.orderBy('createdAt', 'desc'), fb.limit(20));
+    if (direction === 'forward' && qtLastDocRef) {
+      q = fb.query(fb.collection(fb.db, 'quotations'), fb.orderBy('createdAt', 'desc'), fb.startAfter(qtLastDocRef), fb.limit(20));
+    }
+    const snap = await fb.getDocs(q);
+    if (snap.empty) {
+      if (direction === 'init') {
+        tbody.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        updateQtStats([]);
+        document.getElementById('qt-next-btn').disabled = true;
+      } else {
+        showToast('End of quotation records reached.');
+        document.getElementById('qt-next-btn').disabled = true;
+        renderQuotationTable(QT_ACTIVE_CHUNK);
+      }
+      return;
+    }
+    qtLastDocRef = snap.docs[snap.docs.length - 1];
+    QT_ACTIVE_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data(), _docRef: d }));
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+
+    const prevBtn = document.getElementById('qt-prev-btn');
+    if (prevBtn) { prevBtn.disabled = (direction==='init'); prevBtn.style.opacity = (direction==='init')?'0.4':'1'; }
+    const nextBtn = document.getElementById('qt-next-btn');
+    if (nextBtn) nextBtn.disabled = (snap.docs.length < 20);
+    const ind = document.getElementById('qt-page-indicator');
+    if (ind) ind.textContent = `DISPLAYING ${snap.docs.length} QUOTATION RECORDS`;
+  } catch(err) {
+    console.error('Quotation load error:', err);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red);font-family:var(--mono);">FAILED TO LOAD — ${err.message||err}</td></tr>`;
+  }
+}
+
+window.paginateQuotationsForward  = () => loadQuotationsFromFirebase('forward');
+window.paginateQuotationsBackward = () => loadQuotationsFromFirebase('init');
+
+// ── Render table ──
+function renderQuotationTable(list) {
+  const tbody = document.getElementById('qt-log-tbody');
+  const emptyState = document.getElementById('qt-log-empty');
+  if (!tbody) return;
+  if (!list || !list.length) {
+    tbody.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  if (emptyState) emptyState.style.display = 'none';
+
+  const statusBadge = (s) => {
+    const map = {
+      draft:    { bg:'#424242', label:'DRAFT' },
+      pending:  { bg:'#f57c00', label:'PENDING' },
+      approved: { bg:'#2e7d32', label:'APPROVED' },
+      rejected: { bg:'#b71c1c', label:'REJECTED' },
+      voided:   { bg:'#6a1a6a', label:'VOIDED' },
+    };
+    const m = map[s] || { bg:'#555', label:(s||'?').toUpperCase() };
+    return `<span style="font-family:var(--mono);font-size:0.6rem;padding:3px 8px;background:${m.bg};color:#fff;letter-spacing:0.08em;">${m.label}</span>`;
+  };
+
+  tbody.innerHTML = list.map(qt => {
+    const issued = qt.createdAt ? (qt.createdAt.toDate ? qt.createdAt.toDate() : new Date(qt.createdAt)) : new Date();
+    const validUntil = qt.validUntil || '—';
+    const isExpired = qt.validUntil && new Date(qt.validUntil) < new Date() && qt.status === 'pending';
+    return `
+    <tr style="cursor:pointer;${qt.status==='voided'?'opacity:0.55;text-decoration:line-through;':''}" onclick="viewQuotation('${qt.id}')" title="Click to view quotation">
+      <td style="font-family:var(--mono);font-weight:600;color:var(--red);">${qt.quoteId || qt.id.substring(0,8).toUpperCase()}</td>
+      <td style="font-family:var(--mono);color:var(--text-muted);font-size:0.75rem;">${issued.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</td>
+      <td style="font-weight:500;">${qt.client || '—'}</td>
+      <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${qt.preparedBy || '—'}</td>
+      <td style="font-family:var(--mono);font-size:0.75rem;${isExpired?'color:#ef5350;':''}">${validUntil}${isExpired?' <span style="font-size:0.58rem;">(EXPIRED)</span>':''}</td>
+      <td style="font-family:var(--mono);text-align:right;font-weight:600;color:var(--green);">₱${fmtCur(qt.total)}</td>
+      <td style="text-align:center;">${statusBadge(qt.status)}</td>
+      <td style="text-align:center;" onclick="event.stopPropagation();">
+        ${(qt.status === 'draft' || qt.status === 'rejected') ? `<button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;" onclick="editQuotationById('${qt.id}')">Edit</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Stats ──
+function updateQtStats(list) {
+  const total = list.length;
+  const pending  = list.filter(q => q.status === 'pending').length;
+  const approved = list.filter(q => q.status === 'approved').length;
+  const value    = list.filter(q => q.status !== 'rejected' && q.status !== 'voided').reduce((s,q) => s + (parseFloat(q.total)||0), 0);
+  const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  el('qt-stat-count',    total);
+  el('qt-stat-pending',  pending);
+  el('qt-stat-approved', approved);
+  el('qt-stat-value',   '₱' + fmtCur(value));
+}
+
+// ── Search/Filter ──
+window.filterQuotationTable = function() {
+  const s = (document.getElementById('qt-search-input')?.value || '').toLowerCase().trim();
+  if (!s) { renderQuotationTable(QT_ACTIVE_CHUNK); return; }
+  renderQuotationTable(QT_ACTIVE_CHUNK.filter(q =>
+    (q.quoteId||'').toLowerCase().includes(s) ||
+    (q.client||'').toLowerCase().includes(s) ||
+    (q.status||'').toLowerCase().includes(s) ||
+    (q.preparedBy||'').toLowerCase().includes(s)
+  ));
+};
+
+// ── Open New Quotation Modal ──
+function openNewQuotationModal() {
+  _qtEditId = null;
+  _qtLineItems = [];
+  document.getElementById('qt-modal-title').textContent = 'New Quotation';
+  document.getElementById('qt-client').value = '';
+  document.getElementById('qt-contact').value = '';
+  document.getElementById('qt-email').value = '';
+  document.getElementById('qt-notes').value = '';
+  document.getElementById('qt-discount').value = '0';
+  document.getElementById('qt-discount-type').value = 'fixed';
+  document.getElementById('qt-vat-toggle').checked = false;
+  document.getElementById('qt-payment-terms').value = 'Cash';
+  // Default valid until = 30 days from now
+  const d = new Date(); d.setDate(d.getDate()+30);
+  document.getElementById('qt-valid-until').value = d.toISOString().split('T')[0];
+  // Populate product dropdown (sync PRICELIST in case it loaded after module init)
+  if (!window.PRICELIST || !window.PRICELIST.length) window.PRICELIST = (typeof PRICELIST !== 'undefined') ? PRICELIST : [];
+  qtPopulateProductDropdown();
+  qtRenderItemsTable();
+  qtRecalcTotals();
+  document.getElementById('modal-quotation').classList.add('active');
+}
+
+function closeQuotationModal() {
+  document.getElementById('modal-quotation').classList.remove('active');
+}
+
+// ── Edit existing ──
+async function editQuotationById(firestoreId) {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === firestoreId);
+  if (!qt) { showToast('Could not find that quotation.'); return; }
+  if (qt.status === 'voided')   { showToast('⚠ Voided quotations cannot be edited.'); return; }
+  if (qt.status === 'approved') { showToast('⚠ Approved quotations cannot be edited.'); return; }
+  if (qt.status === 'pending')  { showToast('⚠ Quotations pending approval cannot be edited.'); return; }
+  closeQuotationViewModal();
+  _qtEditId = firestoreId;
+  _qtLineItems = Array.isArray(qt.items) ? JSON.parse(JSON.stringify(qt.items)) : [];
+  document.getElementById('qt-modal-title').textContent = 'Edit Quotation — ' + (qt.quoteId || firestoreId);
+  document.getElementById('qt-client').value = qt.client || '';
+  document.getElementById('qt-contact').value = qt.contact || '';
+  document.getElementById('qt-email').value = qt.email || '';
+  document.getElementById('qt-notes').value = qt.notes || '';
+  document.getElementById('qt-discount').value = qt.discountAmt || 0;
+  document.getElementById('qt-discount-type').value = qt.discountType || 'fixed';
+  document.getElementById('qt-vat-toggle').checked = !!qt.vatEnabled;
+  document.getElementById('qt-payment-terms').value = qt.paymentTerms || 'Cash';
+  document.getElementById('qt-valid-until').value = qt.validUntil || '';
+  qtPopulateProductDropdown();
+  qtRenderItemsTable();
+  qtRecalcTotals();
+  document.getElementById('modal-quotation').classList.add('active');
+}
+
+function editCurrentQuotation() {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+  if (qt && qt.status === 'voided')   { showToast('⚠ Voided quotations cannot be edited.'); return; }
+  if (qt && qt.status === 'approved') { showToast('⚠ Approved quotations cannot be edited.'); return; }
+  if (qt && qt.status === 'pending')  { showToast('⚠ Quotations pending approval cannot be edited.'); return; }
+  if (_qtViewId) editQuotationById(_qtViewId);
+}
+
+// ── Populate product select ──
+function qtPopulateProductDropdown() {
+  const sel = document.getElementById('qt-add-product');
+  if (!sel) return;
+  const list = window.PRICELIST || PRICELIST || [];
+  if (!list.length) {
+    sel.innerHTML = '<option value="">— No inventory items found —</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">— Select from inventory —</option>';
+  list.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    const stockLabel = p.stock === 999 ? '∞' : p.stock;
+    const lowStockWarn = (p.stock !== 999 && p.stock <= (p.lowStock || 10)) ? ' ⚠' : '';
+    opt.textContent = `${p.name}${p.model ? ' ['+p.model+']' : ''} — ₱${fmtCur(qtGetPriceForType(p))} (Stock: ${stockLabel}${lowStockWarn})`;
+    opt.dataset.name = p.name + (p.model ? ' ['+p.model+']' : '');
+    opt.dataset.price = qtGetPriceForType(p);
+    opt.dataset.stock = p.stock;
+    opt.dataset.unit  = p.unit || 'pc';
+    opt.dataset.desc  = p.description || '';
+    sel.appendChild(opt);
+  });
+}
+
+function qtGetPriceForType(p) {
+  return p.price || 0;
+}
+
+function qtRebuildLineItems() {
+  qtPopulateProductDropdown();
+  _qtLineItems = _qtLineItems.map(it => {
+    if (it._prodId) {
+      const p = (window.PRICELIST||PRICELIST||[]).find(x => x.id === it._prodId);
+      if (p) it.unitPrice = qtGetPriceForType(p);
+    }
+    it.lineTotal = it.qty * it.unitPrice;
+    return it;
+  });
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+function qtProductSelected() {
+  const sel = document.getElementById('qt-add-product');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) {
+    const hint = document.getElementById('qt-stock-hint');
+    if (hint) hint.textContent = '';
+    return;
+  }
+  const price = parseFloat(opt.dataset.price) || 0;
+  document.getElementById('qt-add-price').value = price.toFixed(2);
+  // Auto-fill description if empty
+  const descEl = document.getElementById('qt-add-desc');
+  if (descEl && !descEl.value && opt.dataset.desc) descEl.value = opt.dataset.desc;
+  // Show stock hint
+  const hint = document.getElementById('qt-stock-hint');
+  if (hint) {
+    const stock = opt.dataset.stock;
+    const unit  = opt.dataset.unit || 'pc';
+    if (stock === '999') {
+      hint.textContent = 'Stock: Unlimited';
+      hint.style.color = 'var(--green)';
+    } else {
+      const s = parseInt(stock) || 0;
+      const low = s <= 10;
+      hint.textContent = `Stock: ${s} ${unit}${low ? ' — LOW STOCK' : ''}`;
+      hint.style.color = low ? 'var(--red)' : 'var(--green)';
+    }
+  }
+}
+
+function qtUpdateAddUnitPrice() { /* qty change — price stays same */ }
+
+// ── Add line item from inventory ──
+function qtAddLineItem() {
+  const sel = document.getElementById('qt-add-product');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) { showToast('Please select a product first.'); return; }
+  const qty   = parseFloat(document.getElementById('qt-add-qty').value) || 1;
+  const price = parseFloat(document.getElementById('qt-add-price').value) || 0;
+  const desc  = document.getElementById('qt-add-desc').value.trim();
+  _qtLineItems.push({ _prodId: opt.value, name: opt.dataset.name || opt.text, desc, qty, unitPrice: price, lineTotal: qty * price });
+  document.getElementById('qt-add-qty').value = 1;
+  document.getElementById('qt-add-price').value = '0';
+  document.getElementById('qt-add-desc').value = '';
+  sel.value = '';
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+// ── Add free-text line item ──
+function qtAddFreeTextItem() {
+  const name  = document.getElementById('qt-add-freetext-name').value.trim();
+  const qty   = parseFloat(document.getElementById('qt-add-freetext-qty').value) || 1;
+  const price = parseFloat(document.getElementById('qt-add-freetext-price').value) || 0;
+  if (!name) { showToast('Enter an item name first.'); return; }
+  _qtLineItems.push({ _prodId: null, name, desc: '', qty, unitPrice: price, lineTotal: qty * price });
+  document.getElementById('qt-add-freetext-name').value = '';
+  document.getElementById('qt-add-freetext-qty').value = 1;
+  document.getElementById('qt-add-freetext-price').value = '0';
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+// ── Remove line item ──
+window.qtRemoveItem = function(idx) {
+  _qtLineItems.splice(idx, 1);
+  qtRenderItemsTable();
+  qtRecalcTotals();
+};
+
+// ── Render items table ──
+function qtRenderItemsTable() {
+  const tbody = document.getElementById('qt-items-tbody');
+  if (!tbody) return;
+  if (!_qtLineItems.length) {
+    tbody.innerHTML = '<tr id="qt-empty-row"><td colspan="7" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">No items added yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _qtLineItems.map((it, i) => `
+    <tr>
+      <td style="font-family:var(--mono);color:var(--text-muted);text-align:center;">${i+1}</td>
+      <td style="font-weight:500;">${it.name}</td>
+      <td style="color:var(--text-muted);font-size:0.78rem;">${it.desc||'—'}</td>
+      <td style="text-align:right;font-family:var(--mono);">
+        <input type="number" value="${it.qty}" min="1" style="width:52px;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;text-align:right;outline:none;"
+          oninput="_qtLineItems[${i}].qty=parseFloat(this.value)||1;_qtLineItems[${i}].lineTotal=_qtLineItems[${i}].qty*_qtLineItems[${i}].unitPrice;qtUpdateRowTotal(${i});qtRecalcTotals();"/>
+      </td>
+      <td style="text-align:right;font-family:var(--mono);">
+        <input type="number" value="${it.unitPrice.toFixed(2)}" min="0" step="0.01" style="width:90px;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;text-align:right;outline:none;"
+          oninput="_qtLineItems[${i}].unitPrice=parseFloat(this.value)||0;_qtLineItems[${i}].lineTotal=_qtLineItems[${i}].qty*_qtLineItems[${i}].unitPrice;qtUpdateRowTotal(${i});qtRecalcTotals();"/>
+      </td>
+      <td style="text-align:right;font-family:var(--mono);font-weight:600;" id="qt-row-total-${i}">₱${fmtCur(it.lineTotal)}</td>
+      <td style="text-align:center;">
+        <button onclick="qtRemoveItem(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:0.9rem;padding:2px 6px;" title="Remove">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+function qtUpdateRowTotal(idx) {
+  const el = document.getElementById('qt-row-total-'+idx);
+  if (el) el.textContent = '₱' + fmtCur(_qtLineItems[idx].lineTotal);
+}
+
+// ── Recalculate totals ──
+function qtRecalcTotals() {
+  const subtotal = _qtLineItems.reduce((s,it) => s + it.lineTotal, 0);
+  const discAmt   = parseFloat(document.getElementById('qt-discount')?.value) || 0;
+  const discType  = document.getElementById('qt-discount-type')?.value || 'fixed';
+  const vatOn     = document.getElementById('qt-vat-toggle')?.checked;
+  const discount  = discType === 'percent' ? (subtotal * discAmt / 100) : discAmt;
+  const afterDisc = Math.max(0, subtotal - discount);
+  const vat       = vatOn ? afterDisc * 0.12 : 0;
+  const total     = afterDisc + vat;
+  const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  el('qt-subtotal-display', '₱'+fmtCur(subtotal));
+  el('qt-vat-display',      '₱'+fmtCur(vat));
+  el('qt-total-display',    '₱'+fmtCur(total));
+  return { subtotal, discount, vat, total };
+}
+
+// ── Save quotation ──
+async function saveQuotation(status) {
+  const client = document.getElementById('qt-client').value.trim();
+  if (!client) { showToast('Client name is required.'); return; }
+  if (!_qtLineItems.length) { showToast('Add at least one line item.'); return; }
+  const { subtotal, discount, vat, total } = qtRecalcTotals();
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase connection unavailable.'); return; }
+
+  // Generate a short quote ID if new
+  let quoteId = _qtEditId ? (QT_ACTIVE_CHUNK.find(q=>q.id===_qtEditId)?.quoteId || '') : await generateQuoteId(fb);
+
+  const payload = {
+    quoteId,
+    client,
+    contact: document.getElementById('qt-contact').value.trim(),
+    email:   document.getElementById('qt-email').value.trim(),
+    notes:   document.getElementById('qt-notes').value.trim(),
+    validUntil: document.getElementById('qt-valid-until').value,
+    paymentTerms: document.getElementById('qt-payment-terms').value,
+    discountAmt:  parseFloat(document.getElementById('qt-discount').value)||0,
+    discountType: document.getElementById('qt-discount-type').value,
+    vatEnabled:   document.getElementById('qt-vat-toggle').checked,
+    items:   _qtLineItems.map(it => ({ name:it.name, desc:it.desc||'', qty:it.qty, unitPrice:it.unitPrice, lineTotal:it.lineTotal, _prodId:it._prodId||null })),
+    subtotal, discount, vat, total,
+    status,
+    preparedBy: actor,
+    updatedAt: fb.serverTimestamp(),
+  };
+
+  try {
+    if (_qtEditId) {
+      await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtEditId), payload);
+      showToast('Quotation updated.');
+    } else {
+      payload.createdAt = fb.serverTimestamp();
+      await fb.addDoc(fb.collection(fb.db, 'quotations'), payload);
+      showToast('Quotation saved — ' + quoteId);
+    }
+    closeQuotationModal();
+    await loadQuotationsFromFirebase('init');
+  } catch(err) {
+    console.error('Save quotation error:', err);
+    showToast('⚠ Save failed: ' + (err.message || err));
+  }
+}
+
+// Generate next QT-XXXX ID from Firestore
+async function generateQuoteId(fb) {
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db,'quotations'), fb.orderBy('createdAt','desc'), fb.limit(1)));
+    if (!snap.empty) {
+      const lastId = snap.docs[0].data().quoteId || '';
+      const num = parseInt(lastId.replace(/\D/g,'')) || 0;
+      return 'QT-' + String(num + 1).padStart(4, '0');
+    }
+  } catch(e) { /* fallback */ }
+  return 'QT-' + Date.now().toString().slice(-4);
+}
+
+// ── View Quotation Detail ──
+async function viewQuotation(firestoreId) {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === firestoreId);
+  if (!qt) return;
+  _qtViewId = firestoreId;
+  document.getElementById('qt-view-id').textContent = qt.quoteId || firestoreId.substring(0,8).toUpperCase();
+
+  const issued = qt.createdAt ? (qt.createdAt.toDate ? qt.createdAt.toDate() : new Date(qt.createdAt)) : new Date();
+  const items = Array.isArray(qt.items) ? qt.items : [];
+
+  const statusColors = { draft:'#424242', pending:'#f57c00', approved:'#2e7d32', rejected:'#b71c1c', voided:'#6a1a6a' };
+  const sc = statusColors[qt.status] || '#555';
+
+  document.getElementById('qt-view-body').innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.12em;color:var(--text-muted);margin-bottom:4px;">CLIENT</div>
+        <div style="font-size:1.1rem;font-weight:700;">${qt.client||'—'}</div>
+        ${qt.contact ? `<div style="color:var(--text-muted);font-size:0.82rem;">${qt.contact}</div>` : ''}
+        ${qt.email   ? `<div style="color:var(--text-muted);font-size:0.82rem;">${qt.email}</div>` : ''}
+      </div>
+      <div style="text-align:right;">
+        <span style="font-family:var(--mono);font-size:0.62rem;padding:4px 12px;background:${sc};color:#fff;letter-spacing:0.1em;">${(qt.status||'').toUpperCase()}</span>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);margin-top:8px;">Issued: ${issued.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Valid Until: ${qt.validUntil||'—'}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Terms: ${qt.paymentTerms||'—'}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Prepared by: ${qt.preparedBy||'—'}</div>
+      </div>
+    </div>
+    <div class="t-wrap" style="border:1px solid var(--border2);margin-bottom:16px;">
+      <table class="htable">
+        <thead style="background:var(--bg3);">
+          <tr>
+            <th style="padding:10px 12px;">#</th>
+            <th style="padding:10px 12px;">Item</th>
+            <th style="padding:10px 12px;">Description</th>
+            <th style="padding:10px 12px;text-align:right;">Qty</th>
+            <th style="padding:10px 12px;text-align:right;">Unit Price</th>
+            <th style="padding:10px 12px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map((it,i) => `
+          <tr>
+            <td style="font-family:var(--mono);color:var(--text-muted);text-align:center;">${i+1}</td>
+            <td style="font-weight:500;">${it.name}</td>
+            <td style="color:var(--text-muted);font-size:0.78rem;">${it.desc||'—'}</td>
+            <td style="text-align:right;font-family:var(--mono);">${it.qty}</td>
+            <td style="text-align:right;font-family:var(--mono);">₱${fmtCur(it.unitPrice)}</td>
+            <td style="text-align:right;font-family:var(--mono);font-weight:600;">₱${fmtCur(it.lineTotal)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+      <div style="background:var(--bg3);border:1px solid var(--border2);padding:16px;min-width:260px;font-family:var(--mono);font-size:0.82rem;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>Subtotal</span><span>₱${fmtCur(qt.subtotal)}</span></div>
+        ${qt.discount ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>Discount</span><span>-₱${fmtCur(qt.discount)}</span></div>` : ''}
+        ${qt.vatEnabled ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>VAT (12%)</span><span>₱${fmtCur(qt.vat)}</span></div>` : ''}
+        <div style="height:1px;background:var(--border2);margin:10px 0;"></div>
+        <div style="display:flex;justify-content:space-between;font-size:1rem;font-weight:700;color:var(--green);"><span>TOTAL</span><span>₱${fmtCur(qt.total)}</span></div>
+      </div>
+    </div>
+    ${qt.notes ? `<div style="background:var(--bg3);border:1px solid var(--border2);padding:12px 16px;font-size:0.82rem;color:var(--text-muted);"><b style="color:var(--text);">Notes:</b> ${qt.notes}</div>` : ''}
+  `;
+
+  // Show/hide approve, reject & void based on status and role
+  const role = window._currentRole || currentRole || 'user';
+  const canVoidOrApprove = role === 'admin' || role === 'super';
+  const isVoided = qt.status === 'voided';
+  const appBtn = document.getElementById('qt-view-approve-btn');
+  const rejBtn = document.getElementById('qt-view-reject-btn');
+  const voidBtn = document.getElementById('qt-view-void-btn');
+  const editBtn = document.getElementById('qt-view-edit-btn');
+  if (appBtn) appBtn.style.display = (isVoided || qt.status === 'approved') ? 'none' : '';
+  if (rejBtn) rejBtn.style.display = (isVoided || qt.status === 'rejected') ? 'none' : '';
+  if (voidBtn) voidBtn.style.display = (canVoidOrApprove && !isVoided) ? '' : 'none';
+  // Edit is only allowed for draft/rejected quotations — locked once pending or approved
+  const canEdit = (qt.status === 'draft' || qt.status === 'rejected');
+  if (editBtn) editBtn.style.display = canEdit ? '' : 'none';
+
+  document.getElementById('modal-qt-view').classList.add('active');
+}
+
+async function voidQuotation() {
+  if (!_qtViewId) return;
+  const role = window._currentRole || currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can void a quotation.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+  const reason = prompt('Reason for voiding this quotation (required):');
+  if (reason === null) return; // cancelled
+  if (!reason.trim()) { showToast('⚠ A reason is required to void a quotation.'); return; }
+  if (!confirm('This will permanently mark the quotation as VOIDED. Continue?')) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtViewId), {
+      status: 'voided',
+      voidedBy: role,
+      voidReason: reason.trim(),
+      voidedAt: fb.serverTimestamp(),
+      updatedAt: fb.serverTimestamp()
+    });
+    const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+    if (qt) { qt.status = 'voided'; qt.voidReason = reason.trim(); }
+    showToast('Quotation voided.');
+    closeQuotationViewModal();
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not void quotation: ' + (err.message || err));
+  }
+}
+
+function closeQuotationViewModal() {
+  document.getElementById('modal-qt-view').classList.remove('active');
+  _qtViewId = null;
+}
+
+// ── Change status ──
+async function changeQuotationStatus(newStatus) {
+ if (!_qtViewId) return;
+  const role = window._currentRole || currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can reject a quotation.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+  const confirmMsg = newStatus === 'approved' ? 'Mark this quotation as APPROVED (won)?' : 'Mark this quotation as REJECTED?';
+  if (!confirm(confirmMsg)) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtViewId), { status: newStatus, updatedAt: fb.serverTimestamp() });
+    const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+    if (qt) qt.status = newStatus;
+    showToast('Status updated to ' + newStatus.toUpperCase() + '.');
+    closeQuotationViewModal();
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not update status: ' + (err.message||err));
+  }
+}
+
+// ── Print ──
+function printQuotation() {
+  const { subtotal, discount, vat, total } = qtRecalcTotals();
+  const client  = document.getElementById('qt-client')?.value || '—';
+  const contact = document.getElementById('qt-contact')?.value || '';
+  const email   = document.getElementById('qt-email')?.value || '';
+  const validUntil  = document.getElementById('qt-valid-until')?.value || '—';
+  const payTerms    = document.getElementById('qt-payment-terms')?.value || '—';
+  const notes       = document.getElementById('qt-notes')?.value || '';
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+  const quoteId = _qtEditId ? (QT_ACTIVE_CHUNK.find(q=>q.id===_qtEditId)?.quoteId || 'DRAFT') : 'DRAFT';
+  buildAndPrintQuote({ quoteId, client, contact, email, validUntil, payTerms, notes, items:_qtLineItems, subtotal, discount, vat, total, preparedBy:actor });
+}
+
+function printCurrentQuotation() {
+  if (!_qtViewId) return;
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+  if (!qt) return;
+  buildAndPrintQuote({ ...qt, items: qt.items || [] });
+}
+
+function buildAndPrintQuote(q) {
+  const rows = (q.items||[]).map(function(it,i){
+    return '<tr>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:center;">'+(i+1)+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;">'+(it.name||'')+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;color:#666;">'+(it.desc||'-')+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:center;">'+it.qty+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:right;">&#8369;'+fmtCur(it.unitPrice)+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:right;font-weight:600;">&#8369;'+fmtCur(it.lineTotal)+'</td>'
+      + '</tr>';
+  }).join('');
+
+  const discRow  = q.discount ? '<tr><td style="color:#666;">Discount</td><td style="text-align:right;">-&#8369;'+fmtCur(q.discount)+'</td></tr>' : '';
+  const vatRow   = q.vat      ? '<tr><td style="color:#666;">VAT (12%)</td><td style="text-align:right;">&#8369;'+fmtCur(q.vat)+'</td></tr>' : '';
+  const notesRow = q.notes    ? '<div style="background:#f5f5f5;padding:12px 16px;font-size:12px;border-left:3px solid #c00;"><b>Notes:</b> '+q.notes+'</div>' : '';
+  const contactLine = (q.contact ? '<div>'+q.contact+'</div>' : '') + (q.email ? '<div>'+q.email+'</div>' : '');
+  const issued = new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'});
+
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { showToast('Pop-up blocked. Please allow pop-ups for printing.'); return; }
+
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
+  w.document.write('<title>Quotation '+(q.quoteId||'')+'</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;font-size:13px;color:#222;margin:0;padding:32px;}');
+  w.document.write('h1{font-size:22px;letter-spacing:2px;margin:0 0 4px;}');
+  w.document.write('table{width:100%;border-collapse:collapse;margin-bottom:16px;}');
+  w.document.write('th{background:#222;color:#fff;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
+  w.document.write('.totals td{border:none;padding:5px 8px;}');
+  w.document.write('@media print{body{padding:0;}}');
+  w.document.write('<\/style><\/head><body>');
+
+  w.document.write('<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;border-bottom:3px solid #c00;padding-bottom:16px;">');
+  w.document.write('<div><h1>QUOTATION</h1><div style="font-size:12px;color:#888;letter-spacing:1px;">ERPB - ENTERPRISE RESOURCE PLANNING BUILDER</div></div>');
+  w.document.write('<div style="text-align:right;font-size:12px;">');
+  w.document.write('<div style="font-size:18px;font-weight:700;color:#c00;">'+(q.quoteId||'DRAFT')+'</div>');
+  w.document.write('<div>Issued: '+issued+'</div>');
+  w.document.write('<div>Valid Until: '+(q.validUntil||'-')+'</div>');
+  w.document.write('</div></div>');
+
+  w.document.write('<div style="display:flex;justify-content:space-between;margin-bottom:24px;">');
+  w.document.write('<div><div style="font-size:10px;letter-spacing:1px;color:#888;text-transform:uppercase;margin-bottom:4px;">Bill To</div>');
+  w.document.write('<div style="font-weight:700;font-size:15px;">'+(q.client||'-')+'</div>'+contactLine+'</div>');
+  w.document.write('<div style="text-align:right;font-size:12px;">');
+  w.document.write('<div><b>Prepared by:</b> '+(q.preparedBy||'-')+'</div>');
+  w.document.write('<div><b>Payment Terms:</b> '+(q.payTerms||q.paymentTerms||'-')+'</div>');
+  w.document.write('</div></div>');
+
+  w.document.write('<table><thead><tr>');
+  w.document.write('<th>#</th><th>Item</th><th>Description</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Unit Price</th><th style="text-align:right;">Total</th>');
+  w.document.write('</tr></thead><tbody>'+rows+'</tbody></table>');
+
+  w.document.write('<div style="display:flex;justify-content:flex-end;margin-bottom:20px;">');
+  w.document.write('<table style="width:260px;" class="totals">');
+  w.document.write('<tr><td style="color:#666;">Subtotal</td><td style="text-align:right;">&#8369;'+fmtCur(q.subtotal)+'</td></tr>');
+  w.document.write(discRow + vatRow);
+  w.document.write('<tr style="border-top:2px solid #222;"><td style="font-weight:700;font-size:14px;">TOTAL</td><td style="font-weight:700;font-size:14px;text-align:right;color:#2e7d32;">&#8369;'+fmtCur(q.total)+'</td></tr>');
+  w.document.write('</table></div>');
+  w.document.write(notesRow);
+  w.document.write('<div style="margin-top:40px;font-size:11px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px;">This quotation is valid until '+(q.validUntil||'-')+' - ERPB System Generated</div>');
+
+  // Inject auto-print via DOM (no script tag in string)
+  var s = w.document.createElement('script');
+  s.textContent = 'window.onload=function(){window.print();}';
+  w.document.body.appendChild(s);
+
+  w.document.write('<\/body><\/html>');
+  w.document.close();
+}
+</script>
