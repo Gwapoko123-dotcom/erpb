@@ -193,7 +193,7 @@
       if (nextBtn) nextBtn.disabled = (snapshot.docs.length < 20);
       
       const indicator = document.getElementById('sales-page-indicator');
-      if (indicator) indicator.textContent = `DISPLAYING BATCH MATRIX OF ${snapshot.docs.length} RECENT RECORDS`;
+      if (indicator) indicator.textContent = ``;
 
     } catch (err) {
       console.error("Sales Cursor Sync Failure:", err);
@@ -1774,8 +1774,123 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         </div>
       </div>
 
-      <!-- ── PLACEHOLDER PAGES ── -->
-      <div id="page-payroll" class="page"><div class="placeholder-card"><h2>PAYROLL</h2><p>Manage salary computation, deductions, and payslip generation.</p></div></div>
+      <!-- ── PAYROLL PAGE ── -->
+      <div id="page-payroll" class="page">
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
+          <div class="page-heading" style="margin-bottom:0;">PAY<span>ROLL</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <select id="payroll-period-select" onchange="loadPayrollPage()"
+              style="background:var(--bg3);border:1px solid var(--border2);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:0.78rem;outline:none;cursor:pointer;">
+            </select>
+            <button class="qa-btn" onclick="openPayrollRunModal()" id="payroll-run-btn" style="display:none;">+ RUN PAYROLL</button>
+          </div>
+        </div>
+
+        <!-- Stat cards -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+          <div class="stat-card">
+            <div class="stat-card-label">Total Gross</div>
+            <div class="stat-card-val" id="pr-stat-gross">—</div>
+            <div class="stat-card-sub" id="pr-stat-headcount">0 employees</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Total Deductions</div>
+            <div class="stat-card-val neutral" id="pr-stat-deduct">—</div>
+            <div class="stat-card-sub">SSS + PhilHealth + Pag-IBIG + Tax</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Total Net Pay</div>
+            <div class="stat-card-val" id="pr-stat-net">—</div>
+            <div class="stat-card-sub">Gross minus all deductions</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Status</div>
+            <div class="stat-card-val neutral" id="pr-stat-status" style="font-size:0.9rem;">—</div>
+            <div class="stat-card-sub" id="pr-stat-date">No period selected</div>
+          </div>
+        </div>
+
+        <!-- Payroll table -->
+        <div style="background:var(--card);border:1px solid var(--border2);border-top:2px solid var(--red);">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid var(--border2);flex-wrap:wrap;gap:8px;">
+            <div style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.12em;color:var(--text-muted);text-transform:uppercase;">Payroll Register</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="payroll-search" placeholder="Search employee…"
+                style="background:var(--bg3);border:1px solid var(--border2);padding:7px 11px;color:var(--text);font-size:0.78rem;outline:none;width:200px;"
+                oninput="filterPayrollTable(this.value)"/>
+              <button class="qa-btn" id="payroll-export-btn" onclick="exportPayrollCSV()" style="display:none;">↓ EXPORT CSV</button>
+            </div>
+          </div>
+          <div class="t-wrap">
+            <table class="htable" id="payroll-table">
+              <thead>
+                <tr>
+                  <th style="min-width:160px;">Employee</th>
+                  <th>Branch</th>
+                  <th style="text-align:right;">Basic Pay</th>
+                  <th style="text-align:right;">SSS</th>
+                  <th style="text-align:right;">PhilHealth</th>
+                  <th style="text-align:right;">Pag-IBIG</th>
+                  <th style="text-align:right;">W/Tax</th>
+                  <th style="text-align:right;color:var(--green);">Net Pay</th>
+                  <th style="text-align:center;">Payslip</th>
+                </tr>
+              </thead>
+              <tbody id="payroll-tbody">
+                <tr><td colspan="9" style="text-align:center;padding:40px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">SELECT A PAY PERIOD TO LOAD PAYROLL DATA</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="payroll-empty" style="display:none;text-align:center;padding:40px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border-top:1px solid var(--border2);">◇<br><br>NO EMPLOYEES WITH SALARY CONFIGURED</div>
+        </div>
+      </div>
+
+      <!-- ── PAYSLIP MODAL ── -->
+      <div id="modal-payslip" class="modal-overlay" onclick="if(event.target===this)closePayslipModal()">
+        <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
+            <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--text);">PAYSLIP</div>
+            <div style="display:flex;gap:8px;">
+              <button class="qa-btn" onclick="printPayslip()" style="padding:5px 12px;font-size:0.62rem;">PRINT</button>
+              <button onclick="closePayslipModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1.1rem;line-height:1;">✕</button>
+            </div>
+          </div>
+          <div id="payslip-body" style="padding:24px 28px;"></div>
+        </div>
+      </div>
+
+      <!-- ── RUN PAYROLL MODAL ── -->
+      <div id="modal-run-payroll" class="modal-overlay" onclick="if(event.target===this)closePayrollRunModal()">
+        <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:440px;max-width:95vw;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
+            <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;">RUN PAYROLL</div>
+            <button onclick="closePayrollRunModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1.1rem;">✕</button>
+          </div>
+          <div style="padding:24px 20px;display:flex;flex-direction:column;gap:16px;">
+            <div>
+              <label style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Pay Period</label>
+              <select id="run-payroll-period" style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-family:var(--mono);font-size:0.78rem;outline:none;"></select>
+            </div>
+            <div>
+              <label style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Pay Date</label>
+              <input type="date" id="run-payroll-date" style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.84rem;outline:none;"/>
+            </div>
+            <div>
+              <label style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:6px;">Notes (Optional)</label>
+              <textarea id="run-payroll-notes" rows="2" placeholder="e.g. Regular semi-monthly payout"
+                style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.84rem;outline:none;resize:vertical;font-family:var(--sans);"></textarea>
+            </div>
+            <div style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.06em;color:var(--text-muted);background:var(--bg3);border:1px solid var(--border2);padding:10px 12px;">
+              This will compute payroll for all employees with a configured salary rate. Deductions are auto-calculated per PH statutory rates.
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <button class="qa-btn" onclick="closePayrollRunModal()">CANCEL</button>
+              <button class="qa-btn" onclick="confirmRunPayroll()" style="border-color:var(--red);color:var(--red);">CONFIRM & RUN</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- ── HUMAN RESOURCE — Employee Directory ── -->
       <div id="page-hr" class="page">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
@@ -2002,9 +2117,555 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     </div>
   </div>
 </div>
-      <div id="page-quotation" class="page"><div class="placeholder-card"><h2>QUOTATION</h2><p>Create and manage client quotations.</p></div></div>
-      <div id="page-leads" class="page"><div class="placeholder-card"><h2>LEADS</h2><p>Track and manage sales leads and prospects.</p></div></div>
-      <div id="page-installation" class="page"><div class="placeholder-card"><h2>INSTALLATION LIST</h2><p>Manage installation jobs and assignments.</p></div></div>
+      <!-- ══════════════════════════════════════════════════════════
+           QUOTATION PAGE
+      ══════════════════════════════════════════════════════════ -->
+      <div id="page-quotation" class="page">
+        <div class="page-heading">QUOTATION <span>BUILDER</span></div>
+
+        <!-- Stat cards -->
+        <div class="stats-row" style="margin-bottom:20px;">
+          <div class="stat-card">
+            <div class="stat-card-label">Total Quotations</div>
+            <div class="stat-card-val neutral" id="qt-stat-count">0</div>
+            <div class="stat-card-sub">All time issued</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Pending Approval</div>
+            <div class="stat-card-val neutral" id="qt-stat-pending" style="color:var(--text);">0</div>
+            <div class="stat-card-sub">Awaiting client decision</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Approved / Won</div>
+            <div class="stat-card-val" id="qt-stat-approved">0</div>
+            <div class="stat-card-sub">Converted to sale</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Total Quoted Value</div>
+            <div class="stat-card-val" id="qt-stat-value">₱0.00</div>
+            <div class="stat-card-sub">Sum of all active quotes</div>
+          </div>
+        </div>
+
+        <div class="placeholder-card" style="padding:24px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="font-size:1.1rem; letter-spacing:0.05em; margin-bottom:4px;">QUOTATION REGISTRY</h2>
+              <p style="font-size:0.78rem; color:var(--text-muted);">Create, send, and track client quotations</p>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <div class="field" style="width:240px; margin:0;">
+                <input type="text" id="qt-search-input" placeholder="🔍 Filter by client, ID, status…" oninput="filterQuotationTable()" style="padding:8px 12px; font-size:0.8rem;"/>
+              </div>
+              <button class="qa-btn" onclick="openNewQuotationModal()" style="padding:8px 18px; background:var(--red); color:#fff; border-color:var(--red); font-size:0.72rem; white-space:nowrap;">+ New Quotation</button>
+            </div>
+          </div>
+
+          <div class="t-wrap" style="border:1px solid var(--border2);">
+            <table class="htable" id="qt-log-table">
+              <thead style="background:var(--bg3);">
+                <tr>
+                  <th style="padding:12px 14px;">Quote ID</th>
+                  <th style="padding:12px 14px;">Date Issued</th>
+                  <th style="padding:12px 14px;">Client Name</th>
+                  <th style="padding:12px 14px;">Prepared By</th>
+                  <th style="padding:12px 14px;">Valid Until</th>
+                  <th style="padding:12px 14px; text-align:right;">Total Amount</th>
+                  <th style="padding:12px 14px; text-align:center;">Status</th>
+                  <th style="padding:12px 14px; text-align:center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="qt-log-tbody">
+                <tr><td colspan="8" style="text-align:center; padding:32px; font-family:var(--mono); color:var(--text-muted);">◇<br><br>LOADING QUOTATION RECORDS…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="qt-log-empty" style="display:none; text-align:center; padding:48px; font-family:var(--mono); font-size:0.75rem; color:var(--text-muted); border:1px solid var(--border2); border-top:none; background:var(--card);">
+            ◇<br><br>NO QUOTATIONS FOUND — CLICK "+ NEW QUOTATION" TO CREATE ONE
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--border2);">
+            <button class="qa-btn" id="qt-prev-btn" onclick="paginateQuotationsBackward()" disabled style="padding:6px 14px; opacity:0.4;">➔ First Page / Reset</button>
+            <span style="font-family:var(--mono); font-size:0.7rem; color:var(--text-muted);" id="qt-page-indicator">LIMIT CHUNK: DYNAMIC REGISTERS</span>
+            <button class="qa-btn" id="qt-next-btn" onclick="paginateQuotationsForward()" disabled style="padding:6px 14px;">Next 20 Rows ➔</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ NEW / EDIT QUOTATION MODAL ══ -->
+      <div id="modal-quotation" class="modal-overlay" onclick="if(event.target===this)closeQuotationModal()">
+        <div class="modal-card modal-xl" style="max-width:860px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            <span id="qt-modal-title">New Quotation</span>
+            <button class="modal-close" onclick="closeQuotationModal()">✕</button>
+          </div>
+
+          <!-- Client & Meta -->
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">
+            <div class="field">
+              <label>Client / Company Name *</label>
+              <input type="text" id="qt-client" placeholder="e.g. ABC Corporation"/>
+            </div>
+            <div class="field">
+              <label>Contact Person</label>
+              <input type="text" id="qt-contact" placeholder="e.g. Juan dela Cruz"/>
+            </div>
+            <div class="field">
+              <label>Contact Email</label>
+              <input type="email" id="qt-email" placeholder="client@email.com"/>
+            </div>
+            <div class="field">
+              <label>Valid Until *</label>
+              <input type="date" id="qt-valid-until"/>
+            </div>
+            <div class="field">
+              <label>Payment Terms</label>
+              <select id="qt-payment-terms">
+                <option value="Cash">Cash</option>
+                <option value="Net 7">Net 7</option>
+                <option value="Net 15">Net 15</option>
+                <option value="Net 30">Net 30</option>
+                <option value="Net 60">Net 60</option>
+                <option value="50% DP">50% Down Payment</option>
+                <option value="Custom">Custom</option>
+              </select>
+            </div>
+
+          </div>
+
+          <!-- Add Item Row -->
+          <div style="background:var(--bg3); border:1px solid var(--border2); padding:14px; margin-bottom:12px;">
+            <div style="font-family:var(--mono); font-size:0.62rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px;">Add Line Item</div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+              <div class="field" style="flex:2; min-width:180px; margin:0;">
+                <label style="font-size:0.7rem;">Product / Service</label>
+                <select id="qt-add-product" onchange="qtProductSelected()" style="font-size:0.82rem;">
+                  <option value="">— Select from inventory —</option>
+                </select>
+              </div>
+              <div class="field" style="width:90px; margin:0;">
+                <label style="font-size:0.7rem;">Qty</label>
+                <input type="number" id="qt-add-qty" value="1" min="1" style="font-size:0.82rem;" oninput="qtUpdateAddUnitPrice()"/>
+              </div>
+              <div class="field" style="width:130px; margin:0;">
+                <label style="font-size:0.7rem;">Unit Price (₱)</label>
+                <input type="number" id="qt-add-price" value="0" min="0" step="0.01" style="font-size:0.82rem;"/>
+              </div>
+              <div class="field" style="flex:1; min-width:140px; margin:0;">
+                <label style="font-size:0.7rem;">Description (optional)</label>
+                <input type="text" id="qt-add-desc" placeholder="Custom note…" style="font-size:0.82rem;"/>
+              </div>
+              <button class="qa-btn" onclick="qtAddLineItem()" style="padding:8px 16px; white-space:nowrap; flex-shrink:0;">+ Add</button>
+            </div>
+            <div style="margin-top:5px;"><span id="qt-stock-hint" style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.05em;"></span></div>
+            <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+              <span style="font-family:var(--mono); font-size:0.6rem; color:var(--text-muted);">OR ADD FREE-TEXT:</span>
+              <input type="text" id="qt-add-freetext-name" placeholder="Item / service name" style="flex:2; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <input type="number" id="qt-add-freetext-qty" value="1" min="1" style="width:60px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <input type="number" id="qt-add-freetext-price" value="0" min="0" step="0.01" placeholder="Price" style="width:110px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <button class="qa-btn" onclick="qtAddFreeTextItem()" style="padding:5px 12px; font-size:0.7rem;">+ Add</button>
+            </div>
+          </div>
+
+          <!-- Line Items Table -->
+          <div class="t-wrap" style="border:1px solid var(--border2); margin-bottom:12px; min-height:80px;">
+            <table class="htable" id="qt-items-table">
+              <thead style="background:var(--bg3);">
+                <tr>
+                  <th style="padding:10px 12px;">#</th>
+                  <th style="padding:10px 12px;">Item</th>
+                  <th style="padding:10px 12px;">Description</th>
+                  <th style="padding:10px 12px; text-align:right; width:60px;">Qty</th>
+                  <th style="padding:10px 12px; text-align:right; width:120px;">Unit Price</th>
+                  <th style="padding:10px 12px; text-align:right; width:120px;">Line Total</th>
+                  <th style="padding:10px 12px; text-align:center; width:60px;">Del</th>
+                </tr>
+              </thead>
+              <tbody id="qt-items-tbody">
+                <tr id="qt-empty-row"><td colspan="7" style="text-align:center; padding:24px; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted);">No items added yet — use the form above</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Totals + Notes -->
+          <div style="display:grid; grid-template-columns:1fr 280px; gap:16px; margin-bottom:16px;">
+            <div class="field">
+              <label>Internal Notes / Remarks</label>
+              <textarea id="qt-notes" rows="3" placeholder="e.g. Delivery included, installation within 2 weeks…" style="width:100%; background:var(--bg3); border:1px solid var(--border2); padding:10px 12px; color:var(--text); font-size:0.84rem; outline:none; resize:vertical; border-radius:0;" onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'"></textarea>
+            </div>
+            <div style="background:var(--bg3); border:1px solid var(--border2); padding:16px; font-family:var(--mono); font-size:0.82rem;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:8px; color:var(--text-muted);">
+                <span>Subtotal</span><span id="qt-subtotal-display">₱0.00</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; color:var(--text-muted);">
+                <span>Discount</span>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input type="number" id="qt-discount" value="0" min="0" step="0.01" oninput="qtRecalcTotals()" style="width:70px; background:var(--bg); border:1px solid var(--border2); padding:3px 6px; color:var(--text); font-size:0.78rem; outline:none; text-align:right;"/>
+                  <select id="qt-discount-type" onchange="qtRecalcTotals()" style="background:var(--bg); border:1px solid var(--border2); padding:3px 6px; color:var(--text); font-size:0.72rem; outline:none;">
+                    <option value="fixed">₱ Fixed</option>
+                    <option value="percent">% Pct</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; color:var(--text-muted);">
+                <span>VAT (12%)</span>
+                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                  <input type="checkbox" id="qt-vat-toggle" onchange="qtRecalcTotals()" style="accent-color:var(--red);"/>
+                  <span id="qt-vat-display">₱0.00</span>
+                </label>
+              </div>
+              <div style="height:1px; background:var(--border2); margin:10px 0;"></div>
+              <div style="display:flex; justify-content:space-between; font-size:1rem; font-weight:700; color:var(--text);">
+                <span>TOTAL</span><span id="qt-total-display" style="color:var(--green);">₱0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-red" onclick="saveQuotation('draft')" style="flex:1; min-width:130px;">Save as Draft</button>
+            <button class="btn btn-red" onclick="saveQuotation('pending')" style="flex:1; min-width:130px; background:#1565c0; border-color:#1565c0;">Send to Client</button>
+            <button class="qa-btn" onclick="printQuotation()" style="padding:10px 18px; flex-shrink:0;">🖨 Preview / Print</button>
+            <button class="btn btn-ghost" onclick="closeQuotationModal()" style="width:120px; margin:0;">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ QUOTATION DETAIL / VIEW MODAL ══ -->
+      <div id="modal-qt-view" class="modal-overlay" onclick="if(event.target===this)closeQuotationViewModal()">
+        <div class="modal-card modal-xl" style="max-width:760px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            Quotation <span id="qt-view-id" style="color:var(--red);"></span>
+            <button class="modal-close" onclick="closeQuotationViewModal()">✕</button>
+          </div>
+          <div id="qt-view-body" style="font-size:0.84rem;"></div>
+          <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
+            <button class="btn btn-red" id="qt-view-approve-btn" onclick="changeQuotationStatus('approved')" style="flex:1; min-width:130px;">✔ Mark Approved</button>
+            <button class="qa-btn" id="qt-view-reject-btn" onclick="changeQuotationStatus('rejected')" style="padding:10px 18px; flex-shrink:0; color:var(--red);">✘ Mark Rejected</button>
+            <button class="qa-btn" id="qt-view-void-btn" onclick="voidQuotation()" style="padding:10px 18px; flex-shrink:0; color:#9c27b0; border-color:#9c27b0; display:none;">⊘ Void</button>
+            <button class="qa-btn" id="qt-view-edit-btn" onclick="editCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">✎ Edit</button>
+            <button class="qa-btn" onclick="printCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">🖨 Print</button>
+            <button class="btn btn-ghost" onclick="closeQuotationViewModal()" style="width:100px; margin:0;">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ QUOTATION PRINT TEMPLATE (hidden) ══ -->
+      <div id="qt-print-area" style="display:none;"></div>
+      <!-- ══════════════════════════════════════════════════════════
+           LEADS PAGE
+      ══════════════════════════════════════════════════════════ -->
+      <div id="page-leads" class="page">
+        <div class="page-heading">LEADS <span>PIPELINE ENGINE</span></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px;">
+          <div class="stat-card"><div class="stat-card-label">Total Leads</div><div class="stat-card-val neutral" id="leads-stat-total">0</div></div>
+          <div class="stat-card"><div class="stat-card-label">New</div><div class="stat-card-val" id="leads-stat-new" style="color:var(--green);">0</div></div>
+          <div class="stat-card"><div class="stat-card-label">In Progress</div><div class="stat-card-val" id="leads-stat-progress" style="color:#f9a825;">0</div></div>
+          <div class="stat-card"><div class="stat-card-label">Converted</div><div class="stat-card-val" id="leads-stat-converted" style="color:#2e7d32;">0</div></div>
+          <div class="stat-card"><div class="stat-card-label">Lost</div><div class="stat-card-val" id="leads-stat-lost" style="color:#b71c1c;">0</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">
+            Sales Lead Records
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="leads-search-input" placeholder="Search leads…" oninput="filterLeadsTable()"
+                style="padding:6px 12px;border:1px solid var(--border2);background:var(--bg);color:var(--text);font-family:var(--mono);font-size:0.75rem;width:200px;"/>
+              <select id="leads-filter-status" onchange="filterLeadsTable()"
+                style="padding:6px 10px;border:1px solid var(--border2);background:var(--bg);color:var(--text);font-family:var(--mono);font-size:0.73rem;">
+                <option value="">All Statuses</option>
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="qualified">Qualified</option>
+                <option value="proposal">Proposal Sent</option>
+                <option value="negotiation">Negotiation</option>
+                <option value="converted">Converted</option>
+                <option value="lost">Lost</option>
+              </select>
+              <button class="btn btn-red" id="leads-new-btn" onclick="openNewLeadModal()" style="padding:7px 18px;white-space:nowrap;">+ New Lead</button>
+            </div>
+          </div>
+
+          <div class="t-wrap">
+            <table class="htable">
+              <thead>
+                <tr>
+                  <th>Lead ID</th>
+                  <th>Company / Contact</th>
+                  <th>Source</th>
+                  <th>Assigned To</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Created</th>
+                  <th style="text-align:center;" title="Activities completed">Tasks</th>
+                  <th style="text-align:center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="leads-tbody">
+                <tr><td colspan="9" style="text-align:center;padding:32px;font-family:var(--mono);color:var(--text-muted);">◇<br><br>LOADING LEAD RECORDS…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="leads-empty" style="display:none;text-align:center;padding:48px;font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);border:1px solid var(--border2);border-top:none;background:var(--card);">◇<br><br>NO LEADS FOUND — CLICK "+ NEW LEAD" TO ADD ONE</div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--border2);">
+            <button class="qa-btn" id="leads-prev-btn" onclick="paginateLeadsBackward()" disabled style="padding:6px 14px;opacity:0.4;">➔ First Page</button>
+            <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);" id="leads-page-indicator">LIMIT CHUNK: DYNAMIC REGISTERS</span>
+            <button class="qa-btn" id="leads-next-btn" onclick="paginateLeadsForward()" disabled style="padding:6px 14px;">Next 20 ➔</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ NEW / EDIT LEAD MODAL ══ -->
+      <div id="modal-lead" class="modal-overlay" onclick="if(event.target===this)closeLeadModal()">
+        <div class="modal-card" style="max-width:680px;max-height:92vh;overflow-y:auto;">
+          <div class="modal-title">
+            <span id="lead-modal-title">New Lead</span>
+            <button class="modal-close" onclick="closeLeadModal()">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div class="field" style="grid-column:1/-1;">
+              <label>Company / Client Name *</label>
+              <input type="text" id="lead-company" placeholder="e.g. ABC Corporation"/>
+            </div>
+            <div class="field">
+              <label>Contact Person</label>
+              <input type="text" id="lead-contact" placeholder="e.g. Juan dela Cruz"/>
+            </div>
+            <div class="field">
+              <label>Contact Email</label>
+              <input type="email" id="lead-email" placeholder="client@email.com"/>
+            </div>
+            <div class="field">
+              <label>Phone Number</label>
+              <input type="text" id="lead-phone" placeholder="+63 9xx xxx xxxx"/>
+            </div>
+            <div class="field">
+              <label>Lead Source</label>
+              <input type="text" id="lead-source" placeholder="e.g. Referral, Walk-In, Social Media…"/>
+            </div>
+            <div class="field">
+              <label>Status *</label>
+              <select id="lead-status">
+                <option value="new">New</option>
+                <option value="contacted">Contacted</option>
+                <option value="qualified">Qualified</option>
+                <option value="proposal">Proposal Sent</option>
+                <option value="negotiation">Negotiation</option>
+                <option value="converted">Converted</option>
+                <option value="lost">Lost</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Priority</label>
+              <select id="lead-priority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Assign To (User) *</label>
+              <select id="lead-assignee"><option value="">— Select a user —</option></select>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Next Follow-Up Date</label>
+              <input type="date" id="lead-followup"/>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Notes / Description</label>
+              <textarea id="lead-notes" rows="3" placeholder="Details about this lead, products of interest, requirements…"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border2);background:var(--bg);color:var(--text);font-family:var(--sans);font-size:0.83rem;resize:vertical;"></textarea>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="closeLeadModal()">Cancel</button>
+            <button class="btn btn-red" id="lead-save-btn" onclick="saveLead()">Save Lead</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ VIEW LEAD MODAL ══ -->
+      <div id="modal-lead-view" class="modal-overlay" onclick="if(event.target===this)closeLeadViewModal()">
+        <div class="modal-card" style="width:680px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:28px 32px;">
+          <div class="modal-title">
+            <span id="lead-view-title">Lead Details</span>
+            <button class="modal-close" onclick="closeLeadViewModal()">✕</button>
+          </div>
+          <div id="lead-view-body" style="font-size:0.84rem;"></div>
+
+          <!-- Activity Confirmation Strip -->
+          <div id="lead-confirm-strip" style="margin-top:14px;border:1px solid var(--border2);padding:12px 16px;display:flex;align-items:center;gap:14px;background:var(--bg3);">
+            <div id="lead-confirm-indicator" style="width:12px;height:12px;border-radius:50%;background:var(--border2);flex-shrink:0;"></div>
+            <div style="flex:1;min-width:0;">
+              <div id="lead-confirm-label" style="font-family:var(--mono);font-size:0.72rem;color:var(--text);">Activity not yet confirmed</div>
+              <div id="lead-confirm-meta" style="font-family:var(--mono);font-size:0.6rem;color:var(--text-muted);margin-top:2px;"></div>
+            </div>
+            <button id="lead-confirm-btn" onclick="toggleLeadConfirmation()"
+              style="font-family:var(--mono);font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;padding:7px 18px;border:1px solid var(--border2);background:transparent;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all 0.15s;">Mark as Done</button>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;border-top:1px solid var(--border2);padding-top:14px;">
+            <button class="btn btn-red" id="lead-view-edit-btn" onclick="editCurrentLead()" style="flex:1;min-width:120px;">✎ Edit Lead</button>
+            <button class="qa-btn" id="lead-view-convert-btn" onclick="convertLead()" style="padding:10px 18px;color:#2e7d32;border-color:#2e7d32;">✔ Mark Converted</button>
+            <button class="qa-btn" id="lead-view-lost-btn" onclick="lostLead()" style="padding:10px 18px;color:#b71c1c;border-color:#b71c1c;">✘ Mark Lost</button>
+            <button class="btn btn-ghost" onclick="closeLeadViewModal()" style="width:90px;margin:0;">Close</button>
+          </div>
+        </div>
+      </div>
+      <!-- ══════════════════════════════════════════════════════════
+           INSTALLATION LIST PAGE
+      ══════════════════════════════════════════════════════════ -->
+      <div id="page-installation" class="page">
+        <div class="page-heading">INSTALLATION LIST <span>JOB ENGINE</span></div>
+
+        <!-- Stats row -->
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px;">
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">TOTAL JOBS</div>
+            <div id="inst-stat-total" style="font-size:1.5rem; font-weight:700; font-family:var(--mono);">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">PENDING</div>
+            <div id="inst-stat-pending" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:#f59e0b;">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">IN PROGRESS</div>
+            <div id="inst-stat-progress" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:#1565c0;">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">COMPLETE</div>
+            <div id="inst-stat-complete" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:var(--green);">0</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <span>Installation Jobs (Top 20 Stream)</span>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <input type="text" id="inst-search-input" placeholder="Search by job # or client…" oninput="filterInstallationTable()"
+                style="background:var(--bg3); border:1px solid var(--border2); padding:6px 12px; color:var(--text); font-size:0.78rem; outline:none; width:220px;"/>
+              <button class="btn btn-red" onclick="openInstallationModal()" style="padding:7px 18px; font-size:0.78rem; white-space:nowrap;">+ New Job</button>
+            </div>
+          </div>
+
+          <div class="t-wrap">
+            <table class="htable">
+              <thead>
+                <tr>
+                  <th>Job #</th>
+                  <th>Date</th>
+                  <th>Client</th>
+                  <th>Address</th>
+                  <th>Assigned To</th>
+                  <th>Scheduled</th>
+                  <th>Status</th>
+                  <th style="text-align:center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="inst-log-tbody"></tbody>
+            </table>
+          </div>
+          <div id="inst-log-empty" style="display:none; text-align:center; padding:32px; font-family:var(--mono); font-size:0.75rem; color:var(--text-muted);">◇ NO INSTALLATION JOBS FOUND</div>
+
+          <div style="display:flex; align-items:center; gap:10px; padding:12px 0 0; flex-wrap:wrap;">
+            <button id="inst-prev-btn" class="qa-btn" onclick="paginateInstallationBackward()" style="padding:6px 14px; font-size:0.72rem;" disabled>◂ Prev</button>
+            <span id="inst-page-indicator" style="font-family:var(--mono); font-size:0.65rem; color:var(--text-muted); flex:1; text-align:center;"></span>
+            <button id="inst-next-btn" class="qa-btn" onclick="paginateInstallationForward()" style="padding:6px 14px; font-size:0.72rem;">Next ▸</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ INSTALLATION JOB FORM MODAL ══ -->
+      <div id="modal-inst-form" class="modal-overlay" onclick="if(event.target===this)closeInstallationModal()">
+        <div class="modal-card modal-xl" style="max-width:700px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            <span id="inst-modal-title">New Installation Job</span>
+            <button class="modal-close" onclick="closeInstallationModal()">✕</button>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div class="field">
+              <label>Client / Company Name *</label>
+              <input type="text" id="inst-client" placeholder="e.g. ABC Corporation"/>
+            </div>
+            <div class="field">
+              <label>Contact Person</label>
+              <input type="text" id="inst-contact" placeholder="e.g. Juan dela Cruz"/>
+            </div>
+            <div class="field">
+              <label>Contact Number</label>
+              <input type="text" id="inst-phone" placeholder="e.g. 09XX-XXX-XXXX"/>
+            </div>
+            <div class="field">
+              <label>Email</label>
+              <input type="email" id="inst-email" placeholder="client@email.com"/>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Installation Address *</label>
+              <input type="text" id="inst-address" placeholder="Full address of installation site"/>
+            </div>
+            <div class="field">
+              <label>Assigned Technician(s)</label>
+              <input type="text" id="inst-technician" placeholder="e.g. Pedro Santos"/>
+            </div>
+            <div class="field">
+              <label>Scheduled Date *</label>
+              <input type="date" id="inst-scheduled-date"/>
+            </div>
+            <div class="field">
+              <label>Scheduled Time</label>
+              <input type="time" id="inst-scheduled-time"/>
+            </div>
+            <div class="field">
+              <label>Priority</label>
+              <select id="inst-priority">
+                <option value="normal">Normal</option>
+                <option value="urgent">Urgent</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Items / Scope of Work *</label>
+              <textarea id="inst-scope" rows="3" placeholder="e.g. Install 2 units AC, mount brackets, test run…"
+                style="width:100%; background:var(--bg3); border:1px solid var(--border2); padding:10px 12px; color:var(--text); font-size:0.84rem; outline:none; resize:vertical; border-radius:0;"
+                onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'"></textarea>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label>Remarks / Notes</label>
+              <textarea id="inst-notes" rows="2" placeholder="Special instructions, access requirements, etc."
+                style="width:100%; background:var(--bg3); border:1px solid var(--border2); padding:10px 12px; color:var(--text); font-size:0.84rem; outline:none; resize:vertical; border-radius:0;"
+                onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'"></textarea>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn btn-red" onclick="saveInstallationJob('pending')" style="flex:1; min-width:140px;">Submit for Approval</button>
+            <button class="btn btn-red" onclick="saveInstallationJob('draft')" style="flex:1; min-width:120px; background:var(--bg3); border-color:var(--border2); color:var(--text);">Save Draft</button>
+            <button class="btn btn-ghost" onclick="closeInstallationModal()" style="width:110px; margin:0;">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ INSTALLATION JOB VIEW MODAL ══ -->
+      <div id="modal-inst-view" class="modal-overlay" onclick="if(event.target===this)closeInstallationViewModal()">
+        <div class="modal-card modal-xl" style="max-width:680px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            Installation Job <span id="inst-view-id" style="color:var(--red);"></span>
+            <button class="modal-close" onclick="closeInstallationViewModal()">✕</button>
+          </div>
+          <div id="inst-view-body" style="font-size:0.84rem; margin-bottom:16px;"></div>
+          <div style="display:flex; gap:10px; margin-top:4px; flex-wrap:wrap;">
+            <button class="btn btn-red" id="inst-view-approve-btn"  onclick="changeInstallationStatus('approved')"   style="flex:1; min-width:130px;">✔ Approve Job</button>
+            <button class="qa-btn"      id="inst-view-progress-btn" onclick="changeInstallationStatus('in_progress')" style="padding:10px 18px; flex-shrink:0; color:#1565c0; border-color:#1565c0;">▶ Mark In Progress</button>
+            <button class="btn btn-red" id="inst-view-complete-btn" onclick="changeInstallationStatus('complete')"   style="flex:1; min-width:130px; background:#2e7d32; border-color:#2e7d32;">✔✔ Mark Complete</button>
+            <button class="qa-btn"      id="inst-view-void-btn"     onclick="voidInstallationJob()"                  style="padding:10px 18px; flex-shrink:0; color:#9c27b0; border-color:#9c27b0; display:none;">⊘ Void</button>
+            <button class="qa-btn"      id="inst-view-edit-btn"     onclick="editCurrentInstallationJob()"           style="padding:10px 18px; flex-shrink:0;">✎ Edit</button>
+            <button class="btn btn-ghost" onclick="closeInstallationViewModal()" style="width:100px; margin:0;">Close</button>
+          </div>
+        </div>
+      </div>
 
 <div id="page-expenses" class="page">
   <div class="page-heading">EXPENSES <span>LEDGER ENGINE</span></div>
@@ -3059,11 +3720,13 @@ async function loadStocksFromFirestore(){
     // or you deleted everything on purpose) — the inventory simply starts
     // empty and stays that way until items are added through the UI.
     PRICELIST = snap.docs.map(d => stockDocToItem(d.id, d.data()));
+    window.PRICELIST = PRICELIST;  // expose to quotation engine
     stocksLoaded = true;
   } catch(e){
     console.error('Failed to load stocks from Firestore:', e);
     showToast('⚠ Could not load inventory from database: ' + (e.code || e.message || e), 6000);
     PRICELIST = [];
+    window.PRICELIST = PRICELIST;
   }
 }
 
@@ -4874,7 +5537,11 @@ function showPage(name, el){
   
   if(name === 'sales'){ window.loadGlobalSalesLogPage(); }
   if(name === 'expenses'){ window.loadGlobalExpensesLogPage('init'); }
+  if(name === 'quotation'){ loadQuotationsPage(); }
+  if(name === 'leads'){ loadLeadsPage('init'); }
+  if(name === 'installation'){ loadInstallationPage(); }
   if(name === 'branches'){ loadBranches(); }
+  if(name === 'payroll'){ initPayrollPage(); }
 }
 // ── PROFILE TABS ──
 function switchTab(name, el){
@@ -5404,6 +6071,446 @@ function filterHREmployees(q){
   );
   renderHRGrid(filtered);
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  PAYROLL MODULE
+// ═══════════════════════════════════════════════════════════════
+
+let PAYROLL_ACTIVE_DATA = [];    // computed payroll rows for current period
+let PAYROLL_PERIODS = [];        // list of available pay periods (from Firestore + generated)
+let PAYROLL_CURRENT_RUN = null;  // currently selected payroll run doc
+
+// ── PH Statutory Deduction Rates (2024 schedule) ──
+function computeDeductions(grossMonthly) {
+  const gross = Number(grossMonthly) || 0;
+  // SSS: semi-monthly bracket simplified — flat % approach for display
+  // Using simplified BIR/SSS/PhilHealth/Pag-IBIG 2024 rates
+  const sss        = Math.min(Math.round(gross * 0.045), 900);         // employee share ~4.5%, cap ₱900/semi
+  const philhealth = Math.round(gross * 0.025);                        // 5% total, 2.5% employee
+  const pagibig    = Math.min(Math.round(gross * 0.02), 200);          // 2%, cap ₱200
+  const totalStatutory = sss + philhealth + pagibig;
+  // Simplified withholding tax (annual taxable income approach)
+  const annualGross = gross * 12;
+  const annualDeduct = (sss + philhealth + pagibig) * 12;
+  const taxable = Math.max(0, annualGross - annualDeduct - 250000); // 250k exempt
+  let annualTax = 0;
+  if      (taxable <= 0)        annualTax = 0;
+  else if (taxable <= 400000)   annualTax = taxable * 0.20;
+  else if (taxable <= 800000)   annualTax = 80000  + (taxable - 400000) * 0.25;
+  else if (taxable <= 2000000)  annualTax = 180000 + (taxable - 800000) * 0.30;
+  else if (taxable <= 8000000)  annualTax = 540000 + (taxable - 2000000) * 0.32;
+  else                          annualTax = 2460000 + (taxable - 8000000) * 0.35;
+  const monthlyTax = Math.round(annualTax / 12);
+  return { sss, philhealth, pagibig, tax: monthlyTax, total: totalStatutory + monthlyTax };
+}
+
+function buildPayPeriods() {
+  const now = new Date();
+  const periods = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const yr = d.getFullYear();
+    const mo = d.toLocaleString('en-PH', { month: 'long' });
+    periods.push({ label: `${mo} ${yr} — 1st Half (1–15)`,   value: `${yr}-${String(d.getMonth()+1).padStart(2,'0')}-A`, year: yr, month: d.getMonth()+1, half: 'A' });
+    periods.push({ label: `${mo} ${yr} — 2nd Half (16–End)`, value: `${yr}-${String(d.getMonth()+1).padStart(2,'0')}-B`, year: yr, month: d.getMonth()+1, half: 'B' });
+  }
+  return periods;
+}
+
+function populatePeriodDropdowns() {
+  PAYROLL_PERIODS = buildPayPeriods();
+  ['payroll-period-select', 'run-payroll-period'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = PAYROLL_PERIODS.map(p =>
+      `<option value="${p.value}">${p.label}</option>`
+    ).join('');
+  });
+  // Default run-payroll date to today
+  const dateEl = document.getElementById('run-payroll-date');
+  if (dateEl) dateEl.value = new Date().toISOString().slice(0,10);
+}
+
+async function initPayrollPage() {
+  const role = window._currentRole;
+  const isAdmin = role === 'admin' || role === 'super';
+  const runBtn = document.getElementById('payroll-run-btn');
+  if (runBtn) runBtn.style.display = isAdmin ? '' : 'none';
+  const exportBtn = document.getElementById('payroll-export-btn');
+
+  populatePeriodDropdowns();
+  await loadPayrollPage();
+}
+
+async function loadPayrollPage() {
+  const periodSel = document.getElementById('payroll-period-select');
+  if (!periodSel) return;
+  const periodKey = periodSel.value;
+  if (!periodKey) return;
+
+  const tbody = document.getElementById('payroll-tbody');
+  const emptyEl = document.getElementById('payroll-empty');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">LOADING PAYROLL DATA…</td></tr>`;
+
+  // Make sure HR employees are loaded
+  if (!HR_ALL_EMPLOYEES.length) {
+    await loadHREmployees();
+  }
+
+  // Filter employees who have a salary configured
+  const empWithSalary = HR_ALL_EMPLOYEES.filter(e => Number(e.salaryRate) > 0);
+
+  // Check if a saved payroll run exists for this period
+  const fb = window._fb;
+  let savedEntries = null;
+  PAYROLL_CURRENT_RUN = null;
+
+  if (fb) {
+    try {
+      const snap = await fb.getDocs(fb.query(
+        fb.collection(fb.db, 'payroll_runs'),
+        fb.where('periodKey', '==', periodKey),
+        fb.limit(1)
+      ));
+      if (!snap.empty) {
+        const runDoc = snap.docs[0];
+        PAYROLL_CURRENT_RUN = { id: runDoc.id, ...runDoc.data() };
+        // Load entries sub-collection
+        const entriesSnap = await fb.getDocs(fb.collection(fb.db, 'payroll_runs', runDoc.id, 'entries'));
+        savedEntries = entriesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+    } catch(e) { console.warn('Could not load payroll run:', e); }
+  }
+
+  // Build payroll rows
+  const periodInfo = PAYROLL_PERIODS.find(p => p.value === periodKey);
+  PAYROLL_ACTIVE_DATA = empWithSalary.map(emp => {
+    const name    = emp.fullName || emp.displayName || emp.email?.split('@')[0] || '—';
+    const gross   = Number(emp.salaryRate) || 0;
+    const semiGross = Math.round(gross / 2); // semi-monthly basis
+    const deduct  = computeDeductions(gross);
+    const semiDeduct = {
+      sss: Math.round(deduct.sss / 2),
+      philhealth: Math.round(deduct.philhealth / 2),
+      pagibig: Math.round(deduct.pagibig / 2),
+      tax: Math.round(deduct.tax / 2),
+      total: Math.round(deduct.total / 2)
+    };
+    const netPay = semiGross - semiDeduct.total;
+
+    // If saved run, override with saved values
+    let saved = null;
+    if (savedEntries) {
+      saved = savedEntries.find(e => e.empId === emp.id);
+    }
+
+    return {
+      empId:      emp.id,
+      name,
+      email:      emp.email || '',
+      branch:     emp.branch || '—',
+      sss:        emp.sss || '',
+      philHealth: emp.philHealth || '',
+      pagIbig:    emp.pagIbig || '',
+      gross:      saved ? Number(saved.gross)      : semiGross,
+      deductSss:  saved ? Number(saved.deductSss)  : semiDeduct.sss,
+      deductPh:   saved ? Number(saved.deductPh)   : semiDeduct.philhealth,
+      deductPag:  saved ? Number(saved.deductPag)  : semiDeduct.pagibig,
+      deductTax:  saved ? Number(saved.deductTax)  : semiDeduct.tax,
+      netPay:     saved ? Number(saved.netPay)      : netPay,
+      periodKey,
+      periodLabel: periodInfo ? periodInfo.label : periodKey
+    };
+  });
+
+  renderPayrollTable(PAYROLL_ACTIVE_DATA);
+  updatePayrollStats(PAYROLL_ACTIVE_DATA, periodInfo);
+
+  const exportBtn = document.getElementById('payroll-export-btn');
+  if (exportBtn) exportBtn.style.display = PAYROLL_ACTIVE_DATA.length ? '' : 'none';
+}
+
+function renderPayrollTable(rows) {
+  const tbody = document.getElementById('payroll-tbody');
+  const emptyEl = document.getElementById('payroll-empty');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  const fmt = v => Number(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const isSaved = !!PAYROLL_CURRENT_RUN;
+  tbody.innerHTML = rows.map((r, idx) => {
+    const name = r.name;
+    const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2) || '?';
+    return `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div style="width:30px;height:30px;background:var(--red-dim);border:1px solid var(--red-border);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:0.7rem;font-weight:700;color:var(--red);flex-shrink:0;">${initials}</div>
+          <div>
+            <div style="font-weight:600;font-size:0.82rem;">${name}</div>
+            <div style="font-size:0.68rem;color:var(--text-muted);font-family:var(--mono);">${r.email}</div>
+          </div>
+        </div>
+      </td>
+      <td><span class="p-tag" style="margin:0;">${r.branch}</span></td>
+      <td style="text-align:right;font-family:var(--mono);">₱${fmt(r.gross)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--text-muted);">₱${fmt(r.deductSss)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--text-muted);">₱${fmt(r.deductPh)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--text-muted);">₱${fmt(r.deductPag)}</td>
+      <td style="text-align:right;font-family:var(--mono);color:var(--text-muted);">₱${fmt(r.deductTax)}</td>
+      <td style="text-align:right;font-family:var(--mono);font-weight:700;color:var(--green);">₱${fmt(r.netPay)}</td>
+      <td style="text-align:center;">
+        <button class="qa-btn" onclick="viewPayslip(${idx})" style="padding:4px 10px;font-size:0.62rem;">VIEW</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function updatePayrollStats(rows, periodInfo) {
+  const fmt = v => '₱' + Number(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const totalGross  = rows.reduce((s,r) => s + r.gross, 0);
+  const totalDeduct = rows.reduce((s,r) => s + r.deductSss + r.deductPh + r.deductPag + r.deductTax, 0);
+  const totalNet    = rows.reduce((s,r) => s + r.netPay, 0);
+
+  const setEl = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  setEl('pr-stat-gross', fmt(totalGross));
+  setEl('pr-stat-deduct', fmt(totalDeduct));
+  setEl('pr-stat-net', fmt(totalNet));
+  setEl('pr-stat-headcount', rows.length + ' employee' + (rows.length!==1?'s':''));
+
+  const statusEl = document.getElementById('pr-stat-status');
+  const dateEl   = document.getElementById('pr-stat-date');
+  if (PAYROLL_CURRENT_RUN) {
+    if (statusEl) { statusEl.textContent = 'PROCESSED'; statusEl.style.color = 'var(--green)'; }
+    const pd = PAYROLL_CURRENT_RUN.payDate ? new Date(PAYROLL_CURRENT_RUN.payDate).toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : '—';
+    if (dateEl) dateEl.textContent = 'Pay date: ' + pd;
+  } else {
+    if (statusEl) { statusEl.textContent = 'DRAFT'; statusEl.style.color = 'var(--text-muted)'; }
+    if (dateEl) dateEl.textContent = periodInfo ? periodInfo.label : '—';
+  }
+}
+
+function filterPayrollTable(q) {
+  if (!q) { renderPayrollTable(PAYROLL_ACTIVE_DATA); return; }
+  const lq = q.toLowerCase();
+  renderPayrollTable(PAYROLL_ACTIVE_DATA.filter(r =>
+    r.name.toLowerCase().includes(lq) ||
+    r.email.toLowerCase().includes(lq) ||
+    r.branch.toLowerCase().includes(lq)
+  ));
+}
+
+function viewPayslip(idx) {
+  const r = PAYROLL_ACTIVE_DATA[idx];
+  if (!r) return;
+  const fmt = v => '₱' + Number(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const totalDeduct = r.deductSss + r.deductPh + r.deductPag + r.deductTax;
+  const initials = r.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'?';
+
+  document.getElementById('payslip-body').innerHTML = `
+    <div style="border-bottom:1px solid var(--border2);padding-bottom:16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+        <div style="width:44px;height:44px;background:var(--red-dim);border:1px solid var(--red-border);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:1rem;font-weight:700;color:var(--red);flex-shrink:0;">${initials}</div>
+        <div>
+          <div style="font-weight:700;font-size:1rem;">${r.name}</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--mono);">${r.email}</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">${r.branch}</div>
+        </div>
+      </div>
+      <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;">${r.periodLabel}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:16px;">
+      <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Basic Pay (Semi-Monthly)</div>
+        <div style="font-family:var(--mono);font-size:1rem;font-weight:700;color:var(--text);">${fmt(r.gross)}</div>
+      </div>
+      <div style="padding:10px 0 10px 16px;border-bottom:1px solid var(--border);">
+        <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Net Pay</div>
+        <div style="font-family:var(--mono);font-size:1rem;font-weight:700;color:var(--green);">${fmt(r.netPay)}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Deductions</div>
+      ${[
+        ['SSS (Employee)',     r.deductSss,  r.sss      ? `SSS # ${r.sss}` : ''],
+        ['PhilHealth',         r.deductPh,   r.philHealth ? `PhilHealth # ${r.philHealth}` : ''],
+        ['Pag-IBIG',           r.deductPag,  r.pagIbig  ? `Pag-IBIG # ${r.pagIbig}` : ''],
+        ['Withholding Tax',    r.deductTax,  'BIR Graduated'],
+      ].map(([lbl, amt, sub]) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+          <div>
+            <div style="font-size:0.82rem;font-weight:500;">${lbl}</div>
+            ${sub ? `<div style="font-size:0.68rem;color:var(--text-muted);font-family:var(--mono);">${sub}</div>` : ''}
+          </div>
+          <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text-muted);">${fmt(amt)}</div>
+        </div>`).join('')}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;font-weight:700;">
+        <span style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.1em;text-transform:uppercase;">Total Deductions</span>
+        <span style="font-family:var(--mono);color:var(--text);">${fmt(totalDeduct)}</span>
+      </div>
+    </div>
+
+    <div style="background:var(--bg3);border:1px solid var(--border2);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-muted);">NET PAY</span>
+      <span style="font-family:var(--mono);font-size:1.35rem;font-weight:700;color:var(--green);">${fmt(r.netPay)}</span>
+    </div>
+
+    <div style="margin-top:12px;font-family:var(--mono);font-size:0.58rem;color:var(--text-muted);text-align:center;letter-spacing:0.06em;">
+      GENERATED BY ERPB · SEMI-MONTHLY PAYROLL · ${new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}
+    </div>
+  `;
+  document.getElementById('modal-payslip').classList.add('active');
+}
+
+function closePayslipModal() {
+  document.getElementById('modal-payslip').classList.remove('active');
+}
+
+function printPayslip() {
+  var body = document.getElementById('payslip-body').innerHTML;
+  var win = window.open('','_blank','width=600,height=700');
+  var css = [
+    '*{box-sizing:border-box;margin:0;padding:0;}',
+    'body{font-family:Inter,sans-serif;color:#0d1b2e;padding:32px;font-size:14px;}',
+    '.p-tag{display:inline-block;padding:2px 6px;border:1px solid #aaa;font-size:11px;}'
+  ].join('');
+  var html = '<!DOCTYPE html><html><head><title>Payslip<\/title>'
+    + '<style>' + css + '<\/style>'
+    + '<\/head><body>' + body
+    + '<script>window.onload=function(){window.print();}<\/scr' + 'ipt>'
+    + '<\/body><\/html>';
+  win.document.write(html);
+  win.document.close();
+}
+
+function openPayrollRunModal() {
+  const role = window._currentRole;
+  if (role !== 'admin' && role !== 'super') { showToast('Admin access required.'); return; }
+  populatePeriodDropdowns();
+  // Pre-select current period
+  const selVal = document.getElementById('payroll-period-select')?.value;
+  const runSel = document.getElementById('run-payroll-period');
+  if (runSel && selVal) runSel.value = selVal;
+  document.getElementById('modal-run-payroll').classList.add('active');
+}
+
+function closePayrollRunModal() {
+  document.getElementById('modal-run-payroll').classList.remove('active');
+}
+
+async function confirmRunPayroll() {
+  const role = window._currentRole;
+  if (role !== 'admin' && role !== 'super') { showToast('Admin access required.'); return; }
+  const periodKey = document.getElementById('run-payroll-period')?.value;
+  const payDate   = document.getElementById('run-payroll-date')?.value;
+  const notes     = document.getElementById('run-payroll-notes')?.value?.trim() || '';
+
+  if (!periodKey) { showToast('Please select a pay period.'); return; }
+  if (!payDate)   { showToast('Please select a pay date.'); return; }
+
+  const fb = window._fb;
+  if (!fb)        { showToast('Firebase unavailable.'); return; }
+
+  if (!HR_ALL_EMPLOYEES.length) await loadHREmployees();
+  const empWithSalary = HR_ALL_EMPLOYEES.filter(e => Number(e.salaryRate) > 0);
+  if (!empWithSalary.length) { showToast('No employees with salary configured.'); return; }
+
+  const periodInfo = PAYROLL_PERIODS.find(p => p.value === periodKey);
+  const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email || 'Admin');
+
+  const confirmOk = window.confirm(
+    `Run payroll for ${periodInfo ? periodInfo.label : periodKey}?\n\n` +
+    `This will process ${empWithSalary.length} employee(s) and save the run to Firebase.`
+  );
+  if (!confirmOk) return;
+
+  try {
+    // Check if a run already exists; if so, ask to overwrite
+    const existQ = await fb.getDocs(fb.query(
+      fb.collection(fb.db, 'payroll_runs'),
+      fb.where('periodKey', '==', periodKey),
+      fb.limit(1)
+    ));
+    let runId;
+    if (!existQ.empty) {
+      if (!window.confirm('A payroll run already exists for this period. Overwrite it?')) return;
+      runId = existQ.docs[0].id;
+      await fb.updateDoc(fb.doc(fb.db, 'payroll_runs', runId), {
+        payDate, notes, updatedAt: fb.serverTimestamp(), updatedBy: actor,
+        headcount: empWithSalary.length
+      });
+    } else {
+      const runRef = await fb.addDoc(fb.collection(fb.db, 'payroll_runs'), {
+        periodKey, periodLabel: periodInfo?.label || periodKey,
+        payDate, notes, createdAt: fb.serverTimestamp(), createdBy: actor,
+        headcount: empWithSalary.length, status: 'processed'
+      });
+      runId = runRef.id;
+    }
+
+    // Save entries
+    for (const emp of empWithSalary) {
+      const gross   = Math.round(Number(emp.salaryRate) / 2);
+      const deduct  = computeDeductions(Number(emp.salaryRate));
+      const semiDed = {
+        sss:      Math.round(deduct.sss / 2),
+        ph:       Math.round(deduct.philhealth / 2),
+        pag:      Math.round(deduct.pagibig / 2),
+        tax:      Math.round(deduct.tax / 2),
+      };
+      const netPay  = gross - semiDed.sss - semiDed.ph - semiDed.pag - semiDed.tax;
+      const entryData = {
+        empId: emp.id, name: emp.fullName||emp.displayName||emp.email||emp.id,
+        email: emp.email||'', branch: emp.branch||'',
+        gross, deductSss: semiDed.sss, deductPh: semiDed.ph, deductPag: semiDed.pag,
+        deductTax: semiDed.tax, netPay, periodKey, payDate
+      };
+      // Upsert by empId
+      const entCol = fb.collection(fb.db, 'payroll_runs', runId, 'entries');
+      const entQ   = await fb.getDocs(fb.query(entCol, fb.where('empId','==',emp.id), fb.limit(1)));
+      if (!entQ.empty) {
+        await fb.updateDoc(fb.doc(fb.db, 'payroll_runs', runId, 'entries', entQ.docs[0].id), entryData);
+      } else {
+        await fb.addDoc(entCol, entryData);
+      }
+    }
+
+    closePayrollRunModal();
+    // Sync view to the processed period
+    const selEl = document.getElementById('payroll-period-select');
+    if (selEl) selEl.value = periodKey;
+    await loadPayrollPage();
+    showToast('Payroll processed for ' + (periodInfo?.label || periodKey));
+  } catch(e) {
+    console.error('Run payroll failed:', e);
+    showToast('⚠ Payroll run failed: ' + (e.message || e.code || e));
+  }
+}
+
+function exportPayrollCSV() {
+  if (!PAYROLL_ACTIVE_DATA.length) { showToast('No data to export.'); return; }
+  const fmt = v => Number(v).toFixed(2);
+  const rows = [
+    ['Employee','Email','Branch','Basic Pay','SSS','PhilHealth','Pag-IBIG','W/Tax','Net Pay','Period'],
+    ...PAYROLL_ACTIVE_DATA.map(r => [
+      r.name, r.email, r.branch, fmt(r.gross), fmt(r.deductSss),
+      fmt(r.deductPh), fmt(r.deductPag), fmt(r.deductTax), fmt(r.netPay), r.periodLabel
+    ])
+  ];
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `payroll_${PAYROLL_ACTIVE_DATA[0]?.periodKey || 'export'}.csv`;
+  a.click();
+}
+
+// ═══════════════════════════════════════════════════════════════
 
 function switchEmpTab(tab, btn) {
   document.querySelectorAll('.emp-tab').forEach(b => b.classList.remove('active'));
@@ -8123,5 +9230,1524 @@ document.addEventListener('click', function(e) {
 });
 </script>
 
-</body>
-</html>
+<!-- ═══════════════════════════════════════════════════════════════
+     QUOTATION ENGINE
+═══════════════════════════════════════════════════════════════ -->
+<script>
+// ── State ──
+let QT_ACTIVE_CHUNK = [];
+let qtLastDocRef = null;
+let _qtEditId = null;         // Firestore doc ID being edited (null = new)
+let _qtViewId = null;         // Firestore doc ID currently viewed
+let _qtLineItems = [];        // Working array for the modal builder
+let _qtQuoteCounter = null;   // Next numeric suffix for QT- IDs
+
+const fmtCur = (n) => Number(n||0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+
+// ── Load page ──
+async function loadQuotationsPage() {
+  await loadQuotationsFromFirebase('init');
+}
+
+// ── Paginated Firebase fetch ──
+async function loadQuotationsFromFirebase(direction = 'init') {
+  const tbody = document.getElementById('qt-log-tbody');
+  const emptyState = document.getElementById('qt-log-empty');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;font-family:var(--mono);color:var(--text-muted);">STREAMING QUOTATION RECORDS…</td></tr>`;
+  if (emptyState) emptyState.style.display = 'none';
+
+  try {
+    const fb = window._fb;
+    if (!fb) throw new Error('Firebase not ready');
+    let q = fb.query(fb.collection(fb.db, 'quotations'), fb.orderBy('createdAt', 'desc'), fb.limit(20));
+    if (direction === 'forward' && qtLastDocRef) {
+      q = fb.query(fb.collection(fb.db, 'quotations'), fb.orderBy('createdAt', 'desc'), fb.startAfter(qtLastDocRef), fb.limit(20));
+    }
+    const snap = await fb.getDocs(q);
+    if (snap.empty) {
+      if (direction === 'init') {
+        tbody.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        updateQtStats([]);
+        document.getElementById('qt-next-btn').disabled = true;
+      } else {
+        showToast('End of quotation records reached.');
+        document.getElementById('qt-next-btn').disabled = true;
+        renderQuotationTable(QT_ACTIVE_CHUNK);
+      }
+      return;
+    }
+    qtLastDocRef = snap.docs[snap.docs.length - 1];
+    QT_ACTIVE_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data(), _docRef: d }));
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+
+    const prevBtn = document.getElementById('qt-prev-btn');
+    if (prevBtn) { prevBtn.disabled = (direction==='init'); prevBtn.style.opacity = (direction==='init')?'0.4':'1'; }
+    const nextBtn = document.getElementById('qt-next-btn');
+    if (nextBtn) nextBtn.disabled = (snap.docs.length < 20);
+    const ind = document.getElementById('qt-page-indicator');
+    if (ind) ind.textContent = `DISPLAYING ${snap.docs.length} QUOTATION RECORDS`;
+  } catch(err) {
+    console.error('Quotation load error:', err);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red);font-family:var(--mono);">FAILED TO LOAD — ${err.message||err}</td></tr>`;
+  }
+}
+
+window.paginateQuotationsForward  = () => loadQuotationsFromFirebase('forward');
+window.paginateQuotationsBackward = () => loadQuotationsFromFirebase('init');
+
+// ── Render table ──
+function renderQuotationTable(list) {
+  const tbody = document.getElementById('qt-log-tbody');
+  const emptyState = document.getElementById('qt-log-empty');
+  if (!tbody) return;
+  if (!list || !list.length) {
+    tbody.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  if (emptyState) emptyState.style.display = 'none';
+
+  const statusBadge = (s) => {
+    const map = {
+      draft:    { bg:'#424242', label:'DRAFT' },
+      pending:  { bg:'#f57c00', label:'PENDING' },
+      approved: { bg:'#2e7d32', label:'APPROVED' },
+      rejected: { bg:'#b71c1c', label:'REJECTED' },
+      voided:   { bg:'#6a1a6a', label:'VOIDED' },
+    };
+    const m = map[s] || { bg:'#555', label:(s||'?').toUpperCase() };
+    return `<span style="font-family:var(--mono);font-size:0.6rem;padding:3px 8px;background:${m.bg};color:#fff;letter-spacing:0.08em;">${m.label}</span>`;
+  };
+
+  tbody.innerHTML = list.map(qt => {
+    const issued = qt.createdAt ? (qt.createdAt.toDate ? qt.createdAt.toDate() : new Date(qt.createdAt)) : new Date();
+    const validUntil = qt.validUntil || '—';
+    const isExpired = qt.validUntil && new Date(qt.validUntil) < new Date() && qt.status === 'pending';
+    return `
+    <tr style="cursor:pointer;${qt.status==='voided'?'opacity:0.55;text-decoration:line-through;':''}" onclick="viewQuotation('${qt.id}')" title="Click to view quotation">
+      <td style="font-family:var(--mono);font-weight:600;color:var(--red);">${qt.quoteId || qt.id.substring(0,8).toUpperCase()}</td>
+      <td style="font-family:var(--mono);color:var(--text-muted);font-size:0.75rem;">${issued.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</td>
+      <td style="font-weight:500;">${qt.client || '—'}</td>
+      <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${qt.preparedBy || '—'}</td>
+      <td style="font-family:var(--mono);font-size:0.75rem;${isExpired?'color:#ef5350;':''}">${validUntil}${isExpired?' <span style="font-size:0.58rem;">(EXPIRED)</span>':''}</td>
+      <td style="font-family:var(--mono);text-align:right;font-weight:600;color:var(--green);">₱${fmtCur(qt.total)}</td>
+      <td style="text-align:center;">${statusBadge(qt.status)}</td>
+      <td style="text-align:center;" onclick="event.stopPropagation();">
+        ${(qt.status === 'draft' || qt.status === 'rejected') ? `<button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;" onclick="editQuotationById('${qt.id}')">Edit</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Stats ──
+function updateQtStats(list) {
+  const total = list.length;
+  const pending  = list.filter(q => q.status === 'pending').length;
+  const approved = list.filter(q => q.status === 'approved').length;
+  const value    = list.filter(q => q.status !== 'rejected' && q.status !== 'voided').reduce((s,q) => s + (parseFloat(q.total)||0), 0);
+  const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  el('qt-stat-count',    total);
+  el('qt-stat-pending',  pending);
+  el('qt-stat-approved', approved);
+  el('qt-stat-value',   '₱' + fmtCur(value));
+}
+
+// ── Search/Filter ──
+window.filterQuotationTable = function() {
+  const s = (document.getElementById('qt-search-input')?.value || '').toLowerCase().trim();
+  if (!s) { renderQuotationTable(QT_ACTIVE_CHUNK); return; }
+  renderQuotationTable(QT_ACTIVE_CHUNK.filter(q =>
+    (q.quoteId||'').toLowerCase().includes(s) ||
+    (q.client||'').toLowerCase().includes(s) ||
+    (q.status||'').toLowerCase().includes(s) ||
+    (q.preparedBy||'').toLowerCase().includes(s)
+  ));
+};
+
+// ── Open New Quotation Modal ──
+function openNewQuotationModal() {
+  _qtEditId = null;
+  _qtLineItems = [];
+  document.getElementById('qt-modal-title').textContent = 'New Quotation';
+  document.getElementById('qt-client').value = '';
+  document.getElementById('qt-contact').value = '';
+  document.getElementById('qt-email').value = '';
+  document.getElementById('qt-notes').value = '';
+  document.getElementById('qt-discount').value = '0';
+  document.getElementById('qt-discount-type').value = 'fixed';
+  document.getElementById('qt-vat-toggle').checked = false;
+  document.getElementById('qt-payment-terms').value = 'Cash';
+  // Default valid until = 30 days from now
+  const d = new Date(); d.setDate(d.getDate()+30);
+  document.getElementById('qt-valid-until').value = d.toISOString().split('T')[0];
+  // Populate product dropdown (sync PRICELIST in case it loaded after module init)
+  if (!window.PRICELIST || !window.PRICELIST.length) window.PRICELIST = (typeof PRICELIST !== 'undefined') ? PRICELIST : [];
+  qtPopulateProductDropdown();
+  qtRenderItemsTable();
+  qtRecalcTotals();
+  document.getElementById('modal-quotation').classList.add('active');
+}
+
+function closeQuotationModal() {
+  document.getElementById('modal-quotation').classList.remove('active');
+}
+
+// ── Edit existing ──
+async function editQuotationById(firestoreId) {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === firestoreId);
+  if (!qt) { showToast('Could not find that quotation.'); return; }
+  if (qt.status === 'voided')   { showToast('⚠ Voided quotations cannot be edited.'); return; }
+  if (qt.status === 'approved') { showToast('⚠ Approved quotations cannot be edited.'); return; }
+  if (qt.status === 'pending')  { showToast('⚠ Quotations pending approval cannot be edited.'); return; }
+  closeQuotationViewModal();
+  _qtEditId = firestoreId;
+  _qtLineItems = Array.isArray(qt.items) ? JSON.parse(JSON.stringify(qt.items)) : [];
+  document.getElementById('qt-modal-title').textContent = 'Edit Quotation — ' + (qt.quoteId || firestoreId);
+  document.getElementById('qt-client').value = qt.client || '';
+  document.getElementById('qt-contact').value = qt.contact || '';
+  document.getElementById('qt-email').value = qt.email || '';
+  document.getElementById('qt-notes').value = qt.notes || '';
+  document.getElementById('qt-discount').value = qt.discountAmt || 0;
+  document.getElementById('qt-discount-type').value = qt.discountType || 'fixed';
+  document.getElementById('qt-vat-toggle').checked = !!qt.vatEnabled;
+  document.getElementById('qt-payment-terms').value = qt.paymentTerms || 'Cash';
+  document.getElementById('qt-valid-until').value = qt.validUntil || '';
+  qtPopulateProductDropdown();
+  qtRenderItemsTable();
+  qtRecalcTotals();
+  document.getElementById('modal-quotation').classList.add('active');
+}
+
+function editCurrentQuotation() {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+  if (qt && qt.status === 'voided')   { showToast('⚠ Voided quotations cannot be edited.'); return; }
+  if (qt && qt.status === 'approved') { showToast('⚠ Approved quotations cannot be edited.'); return; }
+  if (qt && qt.status === 'pending')  { showToast('⚠ Quotations pending approval cannot be edited.'); return; }
+  if (_qtViewId) editQuotationById(_qtViewId);
+}
+
+// ── Populate product select ──
+function qtPopulateProductDropdown() {
+  const sel = document.getElementById('qt-add-product');
+  if (!sel) return;
+  const list = window.PRICELIST || PRICELIST || [];
+  if (!list.length) {
+    sel.innerHTML = '<option value="">— No inventory items found —</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">— Select from inventory —</option>';
+  list.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    const stockLabel = p.stock === 999 ? '∞' : p.stock;
+    const lowStockWarn = (p.stock !== 999 && p.stock <= (p.lowStock || 10)) ? ' ⚠' : '';
+    opt.textContent = `${p.name}${p.model ? ' ['+p.model+']' : ''} — ₱${fmtCur(qtGetPriceForType(p))} (Stock: ${stockLabel}${lowStockWarn})`;
+    opt.dataset.name = p.name + (p.model ? ' ['+p.model+']' : '');
+    opt.dataset.price = qtGetPriceForType(p);
+    opt.dataset.stock = p.stock;
+    opt.dataset.unit  = p.unit || 'pc';
+    opt.dataset.desc  = p.description || '';
+    sel.appendChild(opt);
+  });
+}
+
+function qtGetPriceForType(p) {
+  return p.price || 0;
+}
+
+function qtRebuildLineItems() {
+  qtPopulateProductDropdown();
+  _qtLineItems = _qtLineItems.map(it => {
+    if (it._prodId) {
+      const p = (window.PRICELIST||PRICELIST||[]).find(x => x.id === it._prodId);
+      if (p) it.unitPrice = qtGetPriceForType(p);
+    }
+    it.lineTotal = it.qty * it.unitPrice;
+    return it;
+  });
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+function qtProductSelected() {
+  const sel = document.getElementById('qt-add-product');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) {
+    const hint = document.getElementById('qt-stock-hint');
+    if (hint) hint.textContent = '';
+    return;
+  }
+  const price = parseFloat(opt.dataset.price) || 0;
+  document.getElementById('qt-add-price').value = price.toFixed(2);
+  // Auto-fill description if empty
+  const descEl = document.getElementById('qt-add-desc');
+  if (descEl && !descEl.value && opt.dataset.desc) descEl.value = opt.dataset.desc;
+  // Show stock hint
+  const hint = document.getElementById('qt-stock-hint');
+  if (hint) {
+    const stock = opt.dataset.stock;
+    const unit  = opt.dataset.unit || 'pc';
+    if (stock === '999') {
+      hint.textContent = 'Stock: Unlimited';
+      hint.style.color = 'var(--green)';
+    } else {
+      const s = parseInt(stock) || 0;
+      const low = s <= 10;
+      hint.textContent = `Stock: ${s} ${unit}${low ? ' — LOW STOCK' : ''}`;
+      hint.style.color = low ? 'var(--red)' : 'var(--green)';
+    }
+  }
+}
+
+function qtUpdateAddUnitPrice() { /* qty change — price stays same */ }
+
+// ── Add line item from inventory ──
+function qtAddLineItem() {
+  const sel = document.getElementById('qt-add-product');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) { showToast('Please select a product first.'); return; }
+  const qty   = parseFloat(document.getElementById('qt-add-qty').value) || 1;
+  const price = parseFloat(document.getElementById('qt-add-price').value) || 0;
+  const desc  = document.getElementById('qt-add-desc').value.trim();
+  _qtLineItems.push({ _prodId: opt.value, name: opt.dataset.name || opt.text, desc, qty, unitPrice: price, lineTotal: qty * price });
+  document.getElementById('qt-add-qty').value = 1;
+  document.getElementById('qt-add-price').value = '0';
+  document.getElementById('qt-add-desc').value = '';
+  sel.value = '';
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+// ── Add free-text line item ──
+function qtAddFreeTextItem() {
+  const name  = document.getElementById('qt-add-freetext-name').value.trim();
+  const qty   = parseFloat(document.getElementById('qt-add-freetext-qty').value) || 1;
+  const price = parseFloat(document.getElementById('qt-add-freetext-price').value) || 0;
+  if (!name) { showToast('Enter an item name first.'); return; }
+  _qtLineItems.push({ _prodId: null, name, desc: '', qty, unitPrice: price, lineTotal: qty * price });
+  document.getElementById('qt-add-freetext-name').value = '';
+  document.getElementById('qt-add-freetext-qty').value = 1;
+  document.getElementById('qt-add-freetext-price').value = '0';
+  qtRenderItemsTable();
+  qtRecalcTotals();
+}
+
+// ── Remove line item ──
+window.qtRemoveItem = function(idx) {
+  _qtLineItems.splice(idx, 1);
+  qtRenderItemsTable();
+  qtRecalcTotals();
+};
+
+// ── Render items table ──
+function qtRenderItemsTable() {
+  const tbody = document.getElementById('qt-items-tbody');
+  if (!tbody) return;
+  if (!_qtLineItems.length) {
+    tbody.innerHTML = '<tr id="qt-empty-row"><td colspan="7" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">No items added yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _qtLineItems.map((it, i) => `
+    <tr>
+      <td style="font-family:var(--mono);color:var(--text-muted);text-align:center;">${i+1}</td>
+      <td style="font-weight:500;">${it.name}</td>
+      <td style="color:var(--text-muted);font-size:0.78rem;">${it.desc||'—'}</td>
+      <td style="text-align:right;font-family:var(--mono);">
+        <input type="number" value="${it.qty}" min="1" style="width:52px;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;text-align:right;outline:none;"
+          oninput="_qtLineItems[${i}].qty=parseFloat(this.value)||1;_qtLineItems[${i}].lineTotal=_qtLineItems[${i}].qty*_qtLineItems[${i}].unitPrice;qtUpdateRowTotal(${i});qtRecalcTotals();"/>
+      </td>
+      <td style="text-align:right;font-family:var(--mono);">
+        <input type="number" value="${it.unitPrice.toFixed(2)}" min="0" step="0.01" style="width:90px;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;text-align:right;outline:none;"
+          oninput="_qtLineItems[${i}].unitPrice=parseFloat(this.value)||0;_qtLineItems[${i}].lineTotal=_qtLineItems[${i}].qty*_qtLineItems[${i}].unitPrice;qtUpdateRowTotal(${i});qtRecalcTotals();"/>
+      </td>
+      <td style="text-align:right;font-family:var(--mono);font-weight:600;" id="qt-row-total-${i}">₱${fmtCur(it.lineTotal)}</td>
+      <td style="text-align:center;">
+        <button onclick="qtRemoveItem(${i})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:0.9rem;padding:2px 6px;" title="Remove">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+function qtUpdateRowTotal(idx) {
+  const el = document.getElementById('qt-row-total-'+idx);
+  if (el) el.textContent = '₱' + fmtCur(_qtLineItems[idx].lineTotal);
+}
+
+// ── Recalculate totals ──
+function qtRecalcTotals() {
+  const subtotal = _qtLineItems.reduce((s,it) => s + it.lineTotal, 0);
+  const discAmt   = parseFloat(document.getElementById('qt-discount')?.value) || 0;
+  const discType  = document.getElementById('qt-discount-type')?.value || 'fixed';
+  const vatOn     = document.getElementById('qt-vat-toggle')?.checked;
+  const discount  = discType === 'percent' ? (subtotal * discAmt / 100) : discAmt;
+  const afterDisc = Math.max(0, subtotal - discount);
+  const vat       = vatOn ? afterDisc * 0.12 : 0;
+  const total     = afterDisc + vat;
+  const el = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+  el('qt-subtotal-display', '₱'+fmtCur(subtotal));
+  el('qt-vat-display',      '₱'+fmtCur(vat));
+  el('qt-total-display',    '₱'+fmtCur(total));
+  return { subtotal, discount, vat, total };
+}
+
+// ── Save quotation ──
+async function saveQuotation(status) {
+  const client = document.getElementById('qt-client').value.trim();
+  if (!client) { showToast('Client name is required.'); return; }
+  if (!_qtLineItems.length) { showToast('Add at least one line item.'); return; }
+  const { subtotal, discount, vat, total } = qtRecalcTotals();
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase connection unavailable.'); return; }
+
+  // Generate a short quote ID if new
+  let quoteId = _qtEditId ? (QT_ACTIVE_CHUNK.find(q=>q.id===_qtEditId)?.quoteId || '') : await generateQuoteId(fb);
+
+  const payload = {
+    quoteId,
+    client,
+    contact: document.getElementById('qt-contact').value.trim(),
+    email:   document.getElementById('qt-email').value.trim(),
+    notes:   document.getElementById('qt-notes').value.trim(),
+    validUntil: document.getElementById('qt-valid-until').value,
+    paymentTerms: document.getElementById('qt-payment-terms').value,
+    discountAmt:  parseFloat(document.getElementById('qt-discount').value)||0,
+    discountType: document.getElementById('qt-discount-type').value,
+    vatEnabled:   document.getElementById('qt-vat-toggle').checked,
+    items:   _qtLineItems.map(it => ({ name:it.name, desc:it.desc||'', qty:it.qty, unitPrice:it.unitPrice, lineTotal:it.lineTotal, _prodId:it._prodId||null })),
+    subtotal, discount, vat, total,
+    status,
+    preparedBy: actor,
+    updatedAt: fb.serverTimestamp(),
+  };
+
+  try {
+    if (_qtEditId) {
+      await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtEditId), payload);
+      showToast('Quotation updated.');
+    } else {
+      payload.createdAt = fb.serverTimestamp();
+      await fb.addDoc(fb.collection(fb.db, 'quotations'), payload);
+      showToast('Quotation saved — ' + quoteId);
+    }
+    closeQuotationModal();
+    await loadQuotationsFromFirebase('init');
+  } catch(err) {
+    console.error('Save quotation error:', err);
+    showToast('⚠ Save failed: ' + (err.message || err));
+  }
+}
+
+// Generate next QT-XXXX ID from Firestore
+async function generateQuoteId(fb) {
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db,'quotations'), fb.orderBy('createdAt','desc'), fb.limit(1)));
+    if (!snap.empty) {
+      const lastId = snap.docs[0].data().quoteId || '';
+      const num = parseInt(lastId.replace(/\D/g,'')) || 0;
+      return 'QT-' + String(num + 1).padStart(4, '0');
+    }
+  } catch(e) { /* fallback */ }
+  return 'QT-' + Date.now().toString().slice(-4);
+}
+
+// ── View Quotation Detail ──
+async function viewQuotation(firestoreId) {
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === firestoreId);
+  if (!qt) return;
+  _qtViewId = firestoreId;
+  document.getElementById('qt-view-id').textContent = qt.quoteId || firestoreId.substring(0,8).toUpperCase();
+
+  const issued = qt.createdAt ? (qt.createdAt.toDate ? qt.createdAt.toDate() : new Date(qt.createdAt)) : new Date();
+  const items = Array.isArray(qt.items) ? qt.items : [];
+
+  const statusColors = { draft:'#424242', pending:'#f57c00', approved:'#2e7d32', rejected:'#b71c1c', voided:'#6a1a6a' };
+  const sc = statusColors[qt.status] || '#555';
+
+  document.getElementById('qt-view-body').innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div>
+        <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.12em;color:var(--text-muted);margin-bottom:4px;">CLIENT</div>
+        <div style="font-size:1.1rem;font-weight:700;">${qt.client||'—'}</div>
+        ${qt.contact ? `<div style="color:var(--text-muted);font-size:0.82rem;">${qt.contact}</div>` : ''}
+        ${qt.email   ? `<div style="color:var(--text-muted);font-size:0.82rem;">${qt.email}</div>` : ''}
+      </div>
+      <div style="text-align:right;">
+        <span style="font-family:var(--mono);font-size:0.62rem;padding:4px 12px;background:${sc};color:#fff;letter-spacing:0.1em;">${(qt.status||'').toUpperCase()}</span>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);margin-top:8px;">Issued: ${issued.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Valid Until: ${qt.validUntil||'—'}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Terms: ${qt.paymentTerms||'—'}</div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Prepared by: ${qt.preparedBy||'—'}</div>
+      </div>
+    </div>
+    <div class="t-wrap" style="border:1px solid var(--border2);margin-bottom:16px;">
+      <table class="htable">
+        <thead style="background:var(--bg3);">
+          <tr>
+            <th style="padding:10px 12px;">#</th>
+            <th style="padding:10px 12px;">Item</th>
+            <th style="padding:10px 12px;">Description</th>
+            <th style="padding:10px 12px;text-align:right;">Qty</th>
+            <th style="padding:10px 12px;text-align:right;">Unit Price</th>
+            <th style="padding:10px 12px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map((it,i) => `
+          <tr>
+            <td style="font-family:var(--mono);color:var(--text-muted);text-align:center;">${i+1}</td>
+            <td style="font-weight:500;">${it.name}</td>
+            <td style="color:var(--text-muted);font-size:0.78rem;">${it.desc||'—'}</td>
+            <td style="text-align:right;font-family:var(--mono);">${it.qty}</td>
+            <td style="text-align:right;font-family:var(--mono);">₱${fmtCur(it.unitPrice)}</td>
+            <td style="text-align:right;font-family:var(--mono);font-weight:600;">₱${fmtCur(it.lineTotal)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+      <div style="background:var(--bg3);border:1px solid var(--border2);padding:16px;min-width:260px;font-family:var(--mono);font-size:0.82rem;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>Subtotal</span><span>₱${fmtCur(qt.subtotal)}</span></div>
+        ${qt.discount ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>Discount</span><span>-₱${fmtCur(qt.discount)}</span></div>` : ''}
+        ${qt.vatEnabled ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;color:var(--text-muted);"><span>VAT (12%)</span><span>₱${fmtCur(qt.vat)}</span></div>` : ''}
+        <div style="height:1px;background:var(--border2);margin:10px 0;"></div>
+        <div style="display:flex;justify-content:space-between;font-size:1rem;font-weight:700;color:var(--green);"><span>TOTAL</span><span>₱${fmtCur(qt.total)}</span></div>
+      </div>
+    </div>
+    ${qt.notes ? `<div style="background:var(--bg3);border:1px solid var(--border2);padding:12px 16px;font-size:0.82rem;color:var(--text-muted);"><b style="color:var(--text);">Notes:</b> ${qt.notes}</div>` : ''}
+  `;
+
+  // Show/hide approve, reject & void based on status and role
+  const role = window._currentRole || currentRole || 'user';
+  const canVoidOrApprove = role === 'admin' || role === 'super';
+  const isVoided = qt.status === 'voided';
+  const appBtn = document.getElementById('qt-view-approve-btn');
+  const rejBtn = document.getElementById('qt-view-reject-btn');
+  const voidBtn = document.getElementById('qt-view-void-btn');
+  const editBtn = document.getElementById('qt-view-edit-btn');
+  if (appBtn) appBtn.style.display = (isVoided || qt.status === 'approved') ? 'none' : '';
+  if (rejBtn) rejBtn.style.display = (isVoided || qt.status === 'rejected') ? 'none' : '';
+  if (voidBtn) voidBtn.style.display = (canVoidOrApprove && !isVoided) ? '' : 'none';
+  // Edit is only allowed for draft/rejected quotations — locked once pending or approved
+  const canEdit = (qt.status === 'draft' || qt.status === 'rejected');
+  if (editBtn) editBtn.style.display = canEdit ? '' : 'none';
+
+  document.getElementById('modal-qt-view').classList.add('active');
+}
+
+async function voidQuotation() {
+  if (!_qtViewId) return;
+  const role = window._currentRole || currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can void a quotation.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+  const reason = prompt('Reason for voiding this quotation (required):');
+  if (reason === null) return; // cancelled
+  if (!reason.trim()) { showToast('⚠ A reason is required to void a quotation.'); return; }
+  if (!confirm('This will permanently mark the quotation as VOIDED. Continue?')) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtViewId), {
+      status: 'voided',
+      voidedBy: role,
+      voidReason: reason.trim(),
+      voidedAt: fb.serverTimestamp(),
+      updatedAt: fb.serverTimestamp()
+    });
+    const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+    if (qt) { qt.status = 'voided'; qt.voidReason = reason.trim(); }
+    showToast('Quotation voided.');
+    closeQuotationViewModal();
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not void quotation: ' + (err.message || err));
+  }
+}
+
+function closeQuotationViewModal() {
+  document.getElementById('modal-qt-view').classList.remove('active');
+  _qtViewId = null;
+}
+
+// ── Change status ──
+async function changeQuotationStatus(newStatus) {
+ if (!_qtViewId) return;
+  const role = window._currentRole || currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can reject a quotation.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+  const confirmMsg = newStatus === 'approved' ? 'Mark this quotation as APPROVED (won)?' : 'Mark this quotation as REJECTED?';
+  if (!confirm(confirmMsg)) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'quotations', _qtViewId), { status: newStatus, updatedAt: fb.serverTimestamp() });
+    const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+    if (qt) qt.status = newStatus;
+    showToast('Status updated to ' + newStatus.toUpperCase() + '.');
+    closeQuotationViewModal();
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not update status: ' + (err.message||err));
+  }
+}
+
+// ── Print ──
+function printQuotation() {
+  const { subtotal, discount, vat, total } = qtRecalcTotals();
+  const client  = document.getElementById('qt-client')?.value || '—';
+  const contact = document.getElementById('qt-contact')?.value || '';
+  const email   = document.getElementById('qt-email')?.value || '';
+  const validUntil  = document.getElementById('qt-valid-until')?.value || '—';
+  const payTerms    = document.getElementById('qt-payment-terms')?.value || '—';
+  const notes       = document.getElementById('qt-notes')?.value || '';
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+  const quoteId = _qtEditId ? (QT_ACTIVE_CHUNK.find(q=>q.id===_qtEditId)?.quoteId || 'DRAFT') : 'DRAFT';
+  buildAndPrintQuote({ quoteId, client, contact, email, validUntil, payTerms, notes, items:_qtLineItems, subtotal, discount, vat, total, preparedBy:actor });
+}
+
+function printCurrentQuotation() {
+  if (!_qtViewId) return;
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === _qtViewId);
+  if (!qt) return;
+  buildAndPrintQuote({ ...qt, items: qt.items || [] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LEADS MODULE  (Admin / Super Admin create & assign; Users view assigned)
+// ═══════════════════════════════════════════════════════════════
+
+let LEADS_ACTIVE_CHUNK = [];
+let leadsLastDocRef = null;
+let _leadEditId = null;
+let _leadViewId = null;
+
+const LEAD_STATUS_COLORS = {
+  new:         '#1565c0',
+  contacted:   '#0277bd',
+  qualified:   '#00838f',
+  proposal:    '#6a1b9a',
+  negotiation: '#e65100',
+  converted:   '#2e7d32',
+  lost:        '#b71c1c'
+};
+
+const LEAD_PRIORITY_COLORS = {
+  low:    'var(--text-muted)',
+  medium: '#f9a825',
+  high:   '#c62828'
+};
+
+window.loadLeadsPage = async function(direction = 'init') {
+  const tbody   = document.getElementById('leads-tbody');
+  const emptyEl = document.getElementById('leads-empty');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;font-family:var(--mono);color:var(--text-muted);">◇<br><br>STREAMING LEAD RECORDS…</td></tr>`;
+  if (emptyEl) emptyEl.style.display = 'none';
+  const fb   = window._fb;
+  const role = window._currentRole || 'user';
+  const uid  = window._currentFirebaseUser?.uid;
+  if (!fb || !uid) return;
+  try {
+    let q;
+    if (role === 'admin' || role === 'super') {
+      q = fb.query(fb.collection(fb.db, 'leads'), fb.orderBy('createdAt', 'desc'), fb.limit(20));
+      if (direction === 'forward' && leadsLastDocRef)
+        q = fb.query(fb.collection(fb.db, 'leads'), fb.orderBy('createdAt', 'desc'), fb.startAfter(leadsLastDocRef), fb.limit(20));
+    } else {
+      q = fb.query(fb.collection(fb.db, 'leads'), fb.where('assigneeUid', '==', uid), fb.orderBy('createdAt', 'desc'), fb.limit(20));
+      if (direction === 'forward' && leadsLastDocRef)
+        q = fb.query(fb.collection(fb.db, 'leads'), fb.where('assigneeUid', '==', uid), fb.orderBy('createdAt', 'desc'), fb.startAfter(leadsLastDocRef), fb.limit(20));
+    }
+    const snap = await fb.getDocs(q);
+    if (snap.empty) {
+      tbody.innerHTML = '';
+      if (emptyEl) emptyEl.style.display = 'block';
+      LEADS_ACTIVE_CHUNK = [];
+      updateLeadsStats([]);
+      const nb = document.getElementById('leads-next-btn'); if (nb) nb.disabled = true;
+      return;
+    }
+    leadsLastDocRef = snap.docs[snap.docs.length - 1];
+    LEADS_ACTIVE_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderLeadsTable(LEADS_ACTIVE_CHUNK);
+    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    loadLeadConfirmBadges(LEADS_ACTIVE_CHUNK);
+    const prevBtn = document.getElementById('leads-prev-btn');
+    if (prevBtn) { prevBtn.disabled = (direction === 'init'); prevBtn.style.opacity = (direction === 'init') ? '0.4' : '1'; }
+    const nextBtn = document.getElementById('leads-next-btn');
+    if (nextBtn) nextBtn.disabled = (snap.docs.length < 20);
+    const ind = document.getElementById('leads-page-indicator');
+    if (ind) ind.textContent = `DISPLAYING ${snap.docs.length} LEAD RECORDS`;
+    const newBtn = document.getElementById('leads-new-btn');
+    if (newBtn) newBtn.style.display = (role === 'admin' || role === 'super') ? '' : 'none';
+  } catch (err) {
+    console.error('Leads load error:', err);
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;font-family:var(--mono);color:var(--red);">⚠ FAILED TO LOAD LEADS — CHECK FIRESTORE RULES / INDEXES</td></tr>`;
+  }
+};
+
+window.paginateLeadsForward  = function(){ window.loadLeadsPage('forward'); };
+window.paginateLeadsBackward = function(){ window.loadLeadsPage('init'); };
+
+function renderLeadsTable(list) {
+  const tbody = document.getElementById('leads-tbody');
+  if (!tbody) return;
+  const role    = window._currentRole || 'user';
+  const canEdit = (role === 'admin' || role === 'super');
+  if (!list.length) {
+    tbody.innerHTML = '';
+    const emptyEl = document.getElementById('leads-empty');
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  const emptyEl = document.getElementById('leads-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+  tbody.innerHTML = list.map(lead => {
+    const status   = lead.status   || 'new';
+    const priority = lead.priority || 'medium';
+    const sColor   = LEAD_STATUS_COLORS[status]    || 'var(--text-muted)';
+    const pColor   = LEAD_PRIORITY_COLORS[priority] || 'var(--text-muted)';
+    const created  = lead.createdAt?.toDate ? lead.createdAt.toDate() : (lead.createdAt ? new Date(lead.createdAt) : new Date());
+    const createdStr = created.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' });
+    const assigneeName = lead.assigneeName || lead.assigneeEmail || '—';
+    const company  = lead.company || lead.client || '—';
+    const contact  = lead.contact ? `<div style="font-size:0.7rem;color:var(--text-muted);">${lead.contact}</div>` : '';
+    const editBtn  = canEdit ? `<button class="qa-btn" onclick="event.stopPropagation();openEditLeadModal('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;">✎ Edit</button>` : '';
+    const delBtn   = canEdit ? `<button class="qa-btn" onclick="event.stopPropagation();deleteLead('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;color:#b71c1c;border-color:#b71c1c;">✕</button>` : '';
+    return `<tr onclick="viewLead('${lead.id}')" style="cursor:pointer;" title="Click to view details">
+      <td style="font-family:var(--mono);font-weight:600;color:var(--red);font-size:0.75rem;">${lead.leadId || lead.id.slice(0,8).toUpperCase()}</td>
+      <td><div style="font-weight:500;">${company}</div>${contact}</td>
+      <td><span class="p-tag" style="margin:0;font-size:0.68rem;">${lead.source || '—'}</span></td>
+      <td style="font-size:0.78rem;">${assigneeName}</td>
+      <td><span style="display:inline-block;padding:3px 8px;font-family:var(--mono);font-size:0.65rem;font-weight:700;letter-spacing:0.08em;border:1px solid ${sColor};color:${sColor};text-transform:uppercase;">${status}</span></td>
+      <td><span style="font-family:var(--mono);font-size:0.68rem;font-weight:700;color:${pColor};text-transform:uppercase;">${priority}</span></td>
+      <td style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">${createdStr}</td>
+      <td style="text-align:center;"><span id="lead-confirm-badge-${lead.id}" style="display:none;font-family:var(--mono);font-size:0.6rem;padding:2px 8px;color:#fff;background:#2e7d32;font-weight:700;">✔ DONE</span></td>
+      <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">${editBtn} ${delBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateLeadsStats(list) {
+  const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setEl('leads-stat-total',     list.length);
+  setEl('leads-stat-new',       list.filter(l => l.status === 'new').length);
+  setEl('leads-stat-progress',  list.filter(l => ['contacted','qualified','proposal','negotiation'].includes(l.status)).length);
+  setEl('leads-stat-converted', list.filter(l => l.status === 'converted').length);
+  setEl('leads-stat-lost',      list.filter(l => l.status === 'lost').length);
+}
+
+window.filterLeadsTable = function() {
+  const q  = (document.getElementById('leads-search-input')?.value || '').toLowerCase().trim();
+  const st = (document.getElementById('leads-filter-status')?.value || '').toLowerCase();
+  let filtered = LEADS_ACTIVE_CHUNK;
+  if (q) filtered = filtered.filter(l =>
+    (l.company||'').toLowerCase().includes(q) ||
+    (l.contact||'').toLowerCase().includes(q) ||
+    (l.email||'').toLowerCase().includes(q) ||
+    (l.assigneeName||'').toLowerCase().includes(q) ||
+    (l.leadId||'').toLowerCase().includes(q)
+  );
+  if (st) filtered = filtered.filter(l => (l.status||'new') === st);
+  renderLeadsTable(filtered);
+  updateLeadsStats(filtered);
+};
+
+async function loadUsersForLeadAssignee() {
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    const users = [];
+    snap.forEach(d => {
+      const data = d.data();
+      users.push({ uid: d.id, name: data.displayName || data.fullName || data.email?.split('@')[0] || d.id, email: data.email || '' });
+    });
+    users.sort((a,b) => a.name.localeCompare(b.name));
+    const sel = document.getElementById('lead-assignee');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Select a user —</option>' +
+      users.map(u => `<option value="${u.uid}" data-email="${u.email}" data-name="${u.name}">${u.name}${u.email ? ' (' + u.email + ')' : ''}</option>`).join('');
+  } catch(e) { console.warn('Could not load users for lead assignee:', e); }
+}
+
+window.openNewLeadModal = function() {
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can create leads.'); return; }
+  _leadEditId = null;
+  document.getElementById('lead-modal-title').textContent = 'New Lead';
+  ['lead-company','lead-contact','lead-email','lead-phone','lead-notes','lead-source'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('lead-status').value   = 'new';
+  document.getElementById('lead-priority').value = 'medium';
+  const fuEl = document.getElementById('lead-followup'); if (fuEl) fuEl.value = '';
+  const btn = document.getElementById('lead-save-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Save Lead'; }
+  loadUsersForLeadAssignee();
+  document.getElementById('modal-lead').classList.add('active');
+};
+
+window.openEditLeadModal = function(id) {
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can edit leads.'); return; }
+  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  if (!lead) { showToast('Lead not found.'); return; }
+  _leadEditId = id;
+  document.getElementById('lead-modal-title').textContent = 'Edit Lead';
+  document.getElementById('lead-company').value  = lead.company  || '';
+  document.getElementById('lead-contact').value  = lead.contact  || '';
+  document.getElementById('lead-email').value    = lead.email    || '';
+  document.getElementById('lead-phone').value    = lead.phone    || '';
+  document.getElementById('lead-notes').value    = lead.notes    || '';
+  document.getElementById('lead-source').value   = lead.source   || '';
+  document.getElementById('lead-status').value   = lead.status   || 'new';
+  document.getElementById('lead-priority').value = lead.priority || 'medium';
+  const fuEl = document.getElementById('lead-followup'); if (fuEl) fuEl.value = lead.followUpDate || '';
+  const btn = document.getElementById('lead-save-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Update Lead'; }
+  loadUsersForLeadAssignee().then(() => {
+    const sel = document.getElementById('lead-assignee');
+    if (sel && lead.assigneeUid) sel.value = lead.assigneeUid;
+  });
+  closeLeadViewModal();
+  document.getElementById('modal-lead').classList.add('active');
+};
+
+window.saveLead = async function() {
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can save leads.'); return; }
+  const company = document.getElementById('lead-company')?.value.trim();
+  if (!company) { showToast('⚠ Company / Client Name is required.'); return; }
+  const assigneeSel  = document.getElementById('lead-assignee');
+  const assigneeUid  = assigneeSel?.value || '';
+  const selOpt       = assigneeSel?.options[assigneeSel?.selectedIndex];
+  const assigneeName  = selOpt?.dataset?.name  || selOpt?.text || '';
+  const assigneeEmail = selOpt?.dataset?.email || '';
+  const btn = document.getElementById('lead-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = _leadEditId ? 'Updating…' : 'Saving…'; }
+  const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'Admin';
+  const payload = {
+    company, contact: document.getElementById('lead-contact')?.value.trim() || '',
+    email: document.getElementById('lead-email')?.value.trim() || '',
+    phone: document.getElementById('lead-phone')?.value.trim() || '',
+    source: document.getElementById('lead-source')?.value || '',
+    status: document.getElementById('lead-status')?.value || 'new',
+    priority: document.getElementById('lead-priority')?.value || 'medium',
+    notes: document.getElementById('lead-notes')?.value.trim() || '',
+    followUpDate: document.getElementById('lead-followup')?.value || '',
+    assigneeUid, assigneeName, assigneeEmail,
+    updatedAt: fb.serverTimestamp(), updatedBy: actor
+  };
+  try {
+    if (_leadEditId) {
+      await fb.updateDoc(fb.doc(fb.db, 'leads', _leadEditId), payload);
+      const idx = LEADS_ACTIVE_CHUNK.findIndex(l => l.id === _leadEditId);
+      if (idx !== -1) Object.assign(LEADS_ACTIVE_CHUNK[idx], payload);
+      showToast('Lead updated successfully.');
+    } else {
+      const now = new Date();
+      const leadId = 'LD-' + now.getFullYear().toString().slice(2) + String(now.getMonth()+1).padStart(2,'0') + '-' + Math.floor(Math.random()*9000+1000);
+      payload.leadId = leadId; payload.createdAt = fb.serverTimestamp();
+      payload.createdBy = actor; payload.createdByUid = window._currentFirebaseUser?.uid || '';
+      const ref = await fb.addDoc(fb.collection(fb.db, 'leads'), payload);
+      LEADS_ACTIVE_CHUNK.unshift({ id: ref.id, ...payload, createdAt: { toDate: () => now } });
+      showToast('Lead created: ' + leadId);
+    }
+    closeLeadModal();
+    renderLeadsTable(LEADS_ACTIVE_CHUNK);
+    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+  } catch(err) {
+    console.error('saveLead error:', err);
+    showToast('⚠ Could not save lead: ' + (err.message || err));
+    if (btn) { btn.disabled = false; btn.textContent = _leadEditId ? 'Update Lead' : 'Save Lead'; }
+  }
+};
+
+window.viewLead = function(id) {
+  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  if (!lead) return;
+  _leadViewId = id;
+  const status   = lead.status   || 'new';
+  const priority = lead.priority || 'medium';
+  const sColor   = LEAD_STATUS_COLORS[status]    || 'var(--text-muted)';
+  const pColor   = LEAD_PRIORITY_COLORS[priority] || 'var(--text-muted)';
+  const created  = lead.createdAt?.toDate ? lead.createdAt.toDate() : (lead.createdAt ? new Date(lead.createdAt) : null);
+  const fmtDate  = d => d ? d.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' }) : '—';
+  document.getElementById('lead-view-title').textContent = (lead.leadId || id.slice(0,8).toUpperCase()) + ' — ' + (lead.company || '—');
+  document.getElementById('lead-view-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--border2);">
+      ${[
+        ['Lead ID',          lead.leadId || id.slice(0,8).toUpperCase()],
+        ['Company / Client', lead.company || '—'],
+        ['Contact Person',   lead.contact || '—'],
+        ['Email',            lead.email   || '—'],
+        ['Phone',            lead.phone   || '—'],
+        ['Source',           lead.source  || '—'],
+        ['Assigned To',      (lead.assigneeName || '—') + (lead.assigneeEmail ? '<br><span style="font-size:0.68rem;color:var(--text-muted);">' + lead.assigneeEmail + '</span>' : '')],
+        ['Follow-Up Date',   lead.followUpDate || '—'],
+        ['Created By',       lead.createdBy || '—'],
+        ['Created At',       fmtDate(created)],
+        ['Updated By',       lead.updatedBy || '—'],
+      ].map(([lbl, val]) => `
+        <div style="padding:10px 14px;border-bottom:1px solid var(--border2);border-right:1px solid var(--border2);">
+          <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:3px;">${lbl}</div>
+          <div style="font-size:0.82rem;font-weight:500;">${val}</div>
+        </div>`).join('')}
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border2);border-right:1px solid var(--border2);">
+        <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:3px;">Status</div>
+        <span style="display:inline-block;padding:3px 8px;font-family:var(--mono);font-size:0.65rem;font-weight:700;letter-spacing:0.08em;border:1px solid ${sColor};color:${sColor};text-transform:uppercase;">${status}</span>
+      </div>
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border2);">
+        <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:3px;">Priority</div>
+        <span style="font-family:var(--mono);font-size:0.72rem;font-weight:700;color:${pColor};text-transform:uppercase;">${priority}</span>
+      </div>
+    </div>
+    ${lead.notes ? `<div style="margin-top:12px;background:var(--bg3);border:1px solid var(--border2);padding:12px 14px;">
+      <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;">Notes</div>
+      <div style="font-size:0.82rem;line-height:1.5;">${lead.notes}</div>
+    </div>` : ''}`;
+  const role = window._currentRole || 'user';
+  const canEdit = (role === 'admin' || role === 'super');
+  const editBtn    = document.getElementById('lead-view-edit-btn');
+  const convertBtn = document.getElementById('lead-view-convert-btn');
+  const lostBtn    = document.getElementById('lead-view-lost-btn');
+  if (editBtn)    editBtn.style.display    = canEdit ? '' : 'none';
+  if (convertBtn) convertBtn.style.display = (canEdit && status !== 'converted') ? '' : 'none';
+  if (lostBtn)    lostBtn.style.display    = (canEdit && status !== 'lost') ? '' : 'none';
+  document.getElementById('modal-lead-view').classList.add('active');
+  loadLeadConfirmation(id);
+};
+
+window.editCurrentLead = function() { if (_leadViewId) openEditLeadModal(_leadViewId); };
+
+window.convertLead = async function() {
+  if (!_leadViewId) return;
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can change lead status.'); return; }
+  if (!confirm('Mark this lead as CONVERTED?')) return;
+  await _updateLeadStatus(_leadViewId, 'converted');
+};
+
+window.lostLead = async function() {
+  if (!_leadViewId) return;
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can change lead status.'); return; }
+  if (!confirm('Mark this lead as LOST?')) return;
+  await _updateLeadStatus(_leadViewId, 'lost');
+};
+
+async function loadLeadConfirmation(leadId) {
+  const indicator = document.getElementById('lead-confirm-indicator');
+  const label     = document.getElementById('lead-confirm-label');
+  const meta      = document.getElementById('lead-confirm-meta');
+  const btn       = document.getElementById('lead-confirm-btn');
+  const strip     = document.getElementById('lead-confirm-strip');
+  if (!indicator || !label || !btn) return;
+  const fb   = window._fb;
+  const role = window._currentRole || 'user';
+  const uid  = window._currentFirebaseUser?.uid;
+  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === leadId);
+  const isAssigned = lead && lead.assigneeUid === uid;
+  const canConfirm = role === 'admin' || role === 'super' || isAssigned;
+  if (strip) strip.style.display = canConfirm ? 'flex' : 'none';
+  if (!canConfirm) return;
+  label.textContent = 'Loading…'; meta.textContent = '';
+  try {
+    const snap = fb ? await fb.getDoc(fb.doc(fb.db, 'leads', leadId, 'confirmation', 'activity')) : null;
+    if (snap && snap.exists()) {
+      const d = snap.data();
+      const when = d.doneAt ? (d.doneAt.toDate ? d.doneAt.toDate() : new Date(d.doneAt)) : null;
+      const whenStr = when ? when.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+      _renderConfirmDone(d.doneBy || '', whenStr);
+    } else { _renderConfirmPending(); }
+  } catch(e) { _renderConfirmPending(); }
+}
+
+function _renderConfirmDone(by, when) {
+  const indicator = document.getElementById('lead-confirm-indicator');
+  const label     = document.getElementById('lead-confirm-label');
+  const meta      = document.getElementById('lead-confirm-meta');
+  const btn       = document.getElementById('lead-confirm-btn');
+  if (indicator) { indicator.style.background = '#2e7d32'; indicator.style.boxShadow = '0 0 0 3px rgba(46,125,50,0.2)'; }
+  if (label) { label.textContent = '✔ Activity completed'; label.style.color = '#2e7d32'; }
+  if (meta)  meta.textContent = (by ? 'By ' + by : '') + (when ? (by ? ' · ' : '') + when : '');
+  if (btn)   { btn.textContent = 'Undo'; btn.style.color = '#b71c1c'; btn.style.borderColor = '#b71c1c'; btn.style.background = 'transparent'; }
+}
+
+function _renderConfirmPending() {
+  const indicator = document.getElementById('lead-confirm-indicator');
+  const label     = document.getElementById('lead-confirm-label');
+  const meta      = document.getElementById('lead-confirm-meta');
+  const btn       = document.getElementById('lead-confirm-btn');
+  if (indicator) { indicator.style.background = 'var(--border2)'; indicator.style.boxShadow = 'none'; }
+  if (label) { label.textContent = 'Activity not yet confirmed'; label.style.color = 'var(--text)'; }
+  if (meta)  meta.textContent = '';
+  if (btn)   { btn.textContent = 'Mark as Done'; btn.style.color = '#2e7d32'; btn.style.borderColor = '#2e7d32'; btn.style.background = 'transparent'; }
+}
+
+window.toggleLeadConfirmation = async function() {
+  if (!_leadViewId) return;
+  const fb = window._fb; if (!fb) return;
+  const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'User';
+  const ref   = fb.doc(fb.db, 'leads', _leadViewId, 'confirmation', 'activity');
+  try {
+    const snap = await fb.getDoc(ref);
+    if (snap.exists()) {
+      await fb.deleteDoc(ref);
+      _renderConfirmPending();
+      showToast('Activity confirmation removed.');
+    } else {
+      await fb.setDoc(ref, { done: true, doneAt: fb.serverTimestamp(), doneBy: actor });
+      const now = new Date();
+      _renderConfirmDone(actor, now.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' }));
+      showToast('✔ Activity marked as done.');
+    }
+    _refreshLeadConfirmBadge(_leadViewId);
+  } catch(err) { showToast('⚠ Could not update: ' + (err.message || err)); }
+};
+
+async function _refreshLeadConfirmBadge(leadId) {
+  const fb = window._fb; if (!fb) return;
+  try {
+    const snap  = await fb.getDoc(fb.doc(fb.db, 'leads', leadId, 'confirmation', 'activity'));
+    const badge = document.getElementById('lead-confirm-badge-' + leadId);
+    if (badge) badge.style.display = snap.exists() ? 'inline-block' : 'none';
+  } catch(e) { /* ignore */ }
+}
+
+async function loadLeadConfirmBadges(leads) {
+  for (const lead of leads) _refreshLeadConfirmBadge(lead.id);
+}
+
+async function _updateLeadStatus(id, newStatus) {
+  const fb = window._fb; if (!fb) return;
+  const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'Admin';
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'leads', id), { status: newStatus, updatedAt: fb.serverTimestamp(), updatedBy: actor });
+    const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+    if (lead) lead.status = newStatus;
+    showToast('Lead status updated to ' + newStatus.toUpperCase() + '.');
+    closeLeadViewModal();
+    renderLeadsTable(LEADS_ACTIVE_CHUNK);
+    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+  } catch(err) { showToast('⚠ Could not update status: ' + (err.message || err)); }
+}
+
+window.deleteLead = async function(id) {
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can delete leads.'); return; }
+  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  if (!lead) return;
+  if (!confirm(`Delete lead "${lead.company || id}"? This cannot be undone.`)) return;
+  const fb = window._fb; if (!fb) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'leads', id));
+    const idx = LEADS_ACTIVE_CHUNK.findIndex(l => l.id === id);
+    if (idx !== -1) LEADS_ACTIVE_CHUNK.splice(idx, 1);
+    renderLeadsTable(LEADS_ACTIVE_CHUNK);
+    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    showToast('Lead deleted.');
+  } catch(err) { showToast('⚠ Could not delete: ' + (err.message || err)); }
+};
+
+window.closeLeadModal = function() {
+  document.getElementById('modal-lead').classList.remove('active');
+  _leadEditId = null;
+};
+window.closeLeadViewModal = function() {
+  document.getElementById('modal-lead-view').classList.remove('active');
+  _leadViewId = null;
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  INSTALLATION JOB MODULE
+// ═══════════════════════════════════════════════════════════════
+
+let INST_ACTIVE_CHUNK = [];
+let instLastDocRef   = null;
+let _instEditId      = null;   // Firestore doc ID being edited (null = new)
+let _instViewId      = null;   // Firestore doc ID currently viewed
+
+// ── Load page ──
+async function loadInstallationPage() {
+  await loadInstallationFromFirebase('init');
+}
+
+// ── Paginated Firebase fetch ──
+async function loadInstallationFromFirebase(direction = 'init') {
+  const tbody      = document.getElementById('inst-log-tbody');
+  const emptyState = document.getElementById('inst-log-empty');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;font-family:var(--mono);color:var(--text-muted);">STREAMING INSTALLATION JOB RECORDS…</td></tr>`;
+  if (emptyState) emptyState.style.display = 'none';
+  try {
+    const fb = window._fb;
+    if (!fb) throw new Error('Firebase not ready');
+    let q = fb.query(fb.collection(fb.db, 'installations'), fb.orderBy('createdAt', 'desc'), fb.limit(20));
+    if (direction === 'forward' && instLastDocRef) {
+      q = fb.query(fb.collection(fb.db, 'installations'), fb.orderBy('createdAt', 'desc'), fb.startAfter(instLastDocRef), fb.limit(20));
+    }
+    const snap = await fb.getDocs(q);
+    if (snap.empty) {
+      if (direction === 'init') {
+        tbody.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        updateInstStats([]);
+        const nb = document.getElementById('inst-next-btn'); if (nb) nb.disabled = true;
+      } else {
+        showToast('End of installation job records reached.');
+        const nb = document.getElementById('inst-next-btn'); if (nb) nb.disabled = true;
+        renderInstallationTable(INST_ACTIVE_CHUNK);
+      }
+      return;
+    }
+    instLastDocRef   = snap.docs[snap.docs.length - 1];
+    INST_ACTIVE_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data(), _docRef: d }));
+    renderInstallationTable(INST_ACTIVE_CHUNK);
+    updateInstStats(INST_ACTIVE_CHUNK);
+    const prevBtn = document.getElementById('inst-prev-btn');
+    if (prevBtn) { prevBtn.disabled = (direction === 'init'); prevBtn.style.opacity = (direction === 'init') ? '0.4' : '1'; }
+    const nextBtn = document.getElementById('inst-next-btn');
+    if (nextBtn) nextBtn.disabled = (snap.docs.length < 20);
+    const ind = document.getElementById('inst-page-indicator');
+    if (ind) ind.textContent = `DISPLAYING ${snap.docs.length} INSTALLATION JOB RECORDS`;
+  } catch(err) {
+    console.error('Installation load error:', err);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--red);font-family:var(--mono);">FAILED TO LOAD — ${err.message||err}</td></tr>`;
+  }
+}
+
+window.paginateInstallationForward  = () => loadInstallationFromFirebase('forward');
+window.paginateInstallationBackward = () => loadInstallationFromFirebase('init');
+
+// ── Stats ──
+function updateInstStats(list) {
+  const active = list.filter(j => j.status !== 'voided');
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('inst-stat-total',    active.length);
+  set('inst-stat-pending',  active.filter(j => j.status === 'pending'  || j.status === 'draft').length);
+  set('inst-stat-progress', active.filter(j => j.status === 'approved' || j.status === 'in_progress').length);
+  set('inst-stat-complete', active.filter(j => j.status === 'complete').length);
+}
+
+// ── Render table ──
+function renderInstallationTable(list) {
+  const tbody      = document.getElementById('inst-log-tbody');
+  const emptyState = document.getElementById('inst-log-empty');
+  if (!tbody) return;
+  if (!list || !list.length) {
+    tbody.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'block';
+    return;
+  }
+  if (emptyState) emptyState.style.display = 'none';
+
+  const role = window._currentRole || 'user';
+  const canAdminVoid = role === 'admin' || role === 'super';
+
+  const statusBadge = (s) => {
+    const map = {
+      draft:       ['#607d8b','#eceff1','DRAFT'],
+      pending:     ['#f59e0b','#fffbeb','PENDING'],
+      approved:    ['#1565c0','#e3f2fd','APPROVED'],
+      in_progress: ['#7b1fa2','#f3e5f5','IN PROGRESS'],
+      complete:    ['#2e7d32','#e8f5e9','COMPLETE'],
+      voided:      ['#888',   '#f5f5f5','VOIDED'],
+    };
+    const [bg, fg, label] = map[s] || ['#888','#f5f5f5', (s||'').toUpperCase()];
+    return `<span style="background:${bg};color:${fg};padding:2px 8px;font-size:0.6rem;font-family:var(--mono);letter-spacing:.08em;border-radius:2px;">${label}</span>`;
+  };
+
+  const priorityTag = (p) => {
+    if (p === 'urgent') return `<span style="color:var(--red);font-size:0.65rem;font-family:var(--mono);">⚠ URGENT</span>`;
+    if (p === 'low')    return `<span style="color:var(--text-muted);font-size:0.65rem;font-family:var(--mono);">LOW</span>`;
+    return '';
+  };
+
+  tbody.innerHTML = list.map(job => {
+    const isVoided   = job.status === 'voided';
+    const strike     = isVoided ? 'text-decoration:line-through; opacity:.5;' : '';
+    const createdAt  = job.createdAt ? job.createdAt.toDate ? job.createdAt.toDate() : new Date(job.createdAt) : new Date();
+    const dateStr    = createdAt.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' });
+    const schedStr   = job.scheduledDate || '—';
+
+    // Determine if this user can edit (only draft or pending, and not approved/complete/voided)
+    const canEdit = (job.status === 'draft' || job.status === 'pending') && !isVoided;
+
+    return `
+    <tr style="cursor:pointer;" onclick="viewInstallationJob('${job.id}')">
+      <td style="font-family:var(--mono);font-weight:600;color:var(--red);">#${job.jobId || job.id.substring(0,7).toUpperCase()}</td>
+      <td style="font-family:var(--mono);font-size:0.73rem;color:var(--text-muted);">${dateStr}</td>
+      <td style="font-weight:500;${strike}">${job.client || '—'}</td>
+      <td style="font-size:0.75rem;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${job.address || '—'}</td>
+      <td style="font-size:0.78rem;">${job.technician || '—'}</td>
+      <td style="font-family:var(--mono);font-size:0.73rem;">${schedStr} ${priorityTag(job.priority)}</td>
+      <td>${statusBadge(job.status)}</td>
+      <td style="text-align:center;" onclick="event.stopPropagation();">
+        ${canEdit ? `<button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;" onclick="editInstallationById('${job.id}')">Edit</button>` : ''}
+        ${(isVoided && job.voidReason) ? `<span title="Voided: ${job.voidReason}" style="font-size:0.65rem;color:#9c27b0;font-family:var(--mono);">VOIDED</span>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Search filter ──
+window.filterInstallationTable = function() {
+  const s = (document.getElementById('inst-search-input')?.value || '').toLowerCase().trim();
+  if (!s) { renderInstallationTable(INST_ACTIVE_CHUNK); return; }
+  renderInstallationTable(INST_ACTIVE_CHUNK.filter(j =>
+    (j.jobId||'').toLowerCase().includes(s) ||
+    (j.client||'').toLowerCase().includes(s) ||
+    (j.technician||'').toLowerCase().includes(s) ||
+    (j.address||'').toLowerCase().includes(s)
+  ));
+};
+
+// ── Open form modal (new) ──
+window.openInstallationModal = function() {
+  _instEditId = null;
+  ['inst-client','inst-contact','inst-phone','inst-email','inst-address','inst-technician','inst-scope','inst-notes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const sd = document.getElementById('inst-scheduled-date'); if (sd) sd.value = '';
+  const st = document.getElementById('inst-scheduled-time'); if (st) st.value = '';
+  const pr = document.getElementById('inst-priority'); if (pr) pr.value = 'normal';
+  document.getElementById('inst-modal-title').textContent = 'New Installation Job';
+  document.getElementById('modal-inst-form').classList.add('active');
+};
+
+// ── Edit by ID ──
+window.editInstallationById = async function(firestoreId) {
+  const job = INST_ACTIVE_CHUNK.find(j => j.id === firestoreId);
+  if (!job) { showToast('Job not found in current view.'); return; }
+
+  // Lock editing once approved, in_progress, complete, or voided
+  if (['approved','in_progress','complete','voided'].includes(job.status)) {
+    showToast('⚠ This job is locked — editing is only allowed on Draft or Pending jobs.');
+    return;
+  }
+
+  _instEditId = firestoreId;
+  document.getElementById('inst-modal-title').textContent = 'Edit Installation Job — ' + (job.jobId || firestoreId.substring(0,8).toUpperCase());
+
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  set('inst-client',         job.client);
+  set('inst-contact',        job.contact);
+  set('inst-phone',          job.phone);
+  set('inst-email',          job.email);
+  set('inst-address',        job.address);
+  set('inst-technician',     job.technician);
+  set('inst-scheduled-date', job.scheduledDate);
+  set('inst-scheduled-time', job.scheduledTime);
+  set('inst-scope',          job.scope);
+  set('inst-notes',          job.notes);
+  const pr = document.getElementById('inst-priority'); if (pr) pr.value = job.priority || 'normal';
+
+  document.getElementById('modal-inst-form').classList.add('active');
+};
+
+// ── Edit from view modal ──
+window.editCurrentInstallationJob = function() {
+  if (!_instViewId) return;
+  const job = INST_ACTIVE_CHUNK.find(j => j.id === _instViewId);
+  if (!job) return;
+  if (['approved','in_progress','complete','voided'].includes(job.status)) {
+    showToast('⚠ This job cannot be edited — it has been approved or is in progress.');
+    return;
+  }
+  closeInstallationViewModal();
+  editInstallationById(_instViewId);
+};
+
+window.closeInstallationModal = function() {
+  document.getElementById('modal-inst-form').classList.remove('active');
+  _instEditId = null;
+};
+
+// ── Generate Job ID ──
+async function generateJobId(fb) {
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'installations'), fb.orderBy('jobId','desc'), fb.limit(1)));
+    if (!snap.empty) {
+      const last = snap.docs[0].data().jobId || '';
+      const num  = parseInt(last.replace('IJ-','')) || 0;
+      return 'IJ-' + String(num + 1).padStart(4,'0');
+    }
+  } catch(e) { /* fallback below */ }
+  return 'IJ-' + String(Math.floor(Math.random()*9000)+1000);
+}
+
+// ── Save / Update job ──
+window.saveInstallationJob = async function(submitStatus) {
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+
+  const client  = document.getElementById('inst-client')?.value.trim();
+  const address = document.getElementById('inst-address')?.value.trim();
+  const scope   = document.getElementById('inst-scope')?.value.trim();
+  const sched   = document.getElementById('inst-scheduled-date')?.value;
+
+  if (!client)  { showToast('⚠ Client name is required.');         return; }
+  if (!address) { showToast('⚠ Installation address is required.'); return; }
+  if (!scope)   { showToast('⚠ Scope of work is required.');        return; }
+  if (submitStatus === 'pending' && !sched) { showToast('⚠ Scheduled date is required before submitting.'); return; }
+
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+
+  try {
+    let jobId = _instEditId ? (INST_ACTIVE_CHUNK.find(j => j.id === _instEditId)?.jobId || '') : await generateJobId(fb);
+
+    const payload = {
+      jobId,
+      client,
+      contact:       document.getElementById('inst-contact')?.value.trim() || '',
+      phone:         document.getElementById('inst-phone')?.value.trim() || '',
+      email:         document.getElementById('inst-email')?.value.trim() || '',
+      address,
+      technician:    document.getElementById('inst-technician')?.value.trim() || '',
+      scheduledDate: sched || '',
+      scheduledTime: document.getElementById('inst-scheduled-time')?.value || '',
+      priority:      document.getElementById('inst-priority')?.value || 'normal',
+      scope,
+      notes:         document.getElementById('inst-notes')?.value.trim() || '',
+      status:        submitStatus,
+      updatedAt:     fb.serverTimestamp(),
+    };
+
+    if (_instEditId) {
+      await fb.updateDoc(fb.doc(fb.db, 'installations', _instEditId), payload);
+      showToast('Installation job updated — ' + jobId);
+    } else {
+      payload.createdAt  = fb.serverTimestamp();
+      payload.createdBy  = actor;
+      await fb.addDoc(fb.collection(fb.db, 'installations'), payload);
+      showToast('Installation job saved — ' + jobId);
+    }
+
+    closeInstallationModal();
+    await loadInstallationFromFirebase('init');
+  } catch(err) {
+    showToast('⚠ Could not save job: ' + (err.message || err));
+  }
+};
+
+// ── View job modal ──
+window.viewInstallationJob = function(firestoreId) {
+  const job = INST_ACTIVE_CHUNK.find(j => j.id === firestoreId);
+  if (!job) return;
+  _instViewId = firestoreId;
+
+  document.getElementById('inst-view-id').textContent = job.jobId || firestoreId.substring(0,8).toUpperCase();
+
+  const createdAt = job.createdAt ? (job.createdAt.toDate ? job.createdAt.toDate() : new Date(job.createdAt)) : new Date();
+  const dateStr   = createdAt.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+  const voidedBlock = job.status === 'voided' ? `
+    <div style="background:#f3e5f5;border-left:3px solid #9c27b0;padding:10px 14px;margin-bottom:12px;font-size:0.8rem;">
+      <b style="color:#9c27b0;">VOIDED</b> — ${job.voidReason || ''}
+      <span style="color:var(--text-muted);font-size:0.72rem;margin-left:8px;">by ${job.voidedBy || '—'}</span>
+    </div>` : '';
+
+  document.getElementById('inst-view-body').innerHTML = `
+    ${voidedBlock}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:14px;font-size:0.83rem;">
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">CLIENT</span><div style="font-weight:600;margin-top:2px;">${job.client||'—'}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">CONTACT</span><div style="margin-top:2px;">${job.contact||'—'} ${job.phone ? '· '+job.phone : ''}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">EMAIL</span><div style="margin-top:2px;">${job.email||'—'}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">PRIORITY</span><div style="margin-top:2px;text-transform:uppercase;font-weight:600;">${job.priority||'Normal'}</div></div>
+      <div style="grid-column:1/-1;"><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">ADDRESS</span><div style="margin-top:2px;">${job.address||'—'}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">TECHNICIAN</span><div style="margin-top:2px;">${job.technician||'—'}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">SCHEDULED</span><div style="margin-top:2px;">${job.scheduledDate||'—'} ${job.scheduledTime||''}</div></div>
+      <div style="grid-column:1/-1;"><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">SCOPE OF WORK</span><div style="margin-top:4px;white-space:pre-wrap;">${job.scope||'—'}</div></div>
+      ${job.notes ? `<div style="grid-column:1/-1;"><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">NOTES</span><div style="margin-top:4px;color:var(--text-muted);">${job.notes}</div></div>` : ''}
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">CREATED</span><div style="margin-top:2px;font-size:0.75rem;">${dateStr} by ${job.createdBy||'—'}</div></div>
+      <div><span style="color:var(--text-muted);font-family:var(--mono);font-size:0.65rem;">STATUS</span><div style="margin-top:4px;font-weight:700;text-transform:uppercase;">${job.status||'draft'}</div></div>
+    </div>`;
+
+  const role            = window._currentRole || 'user';
+  const canAdminVoid    = role === 'admin' || role === 'super';
+  const canApprove      = canAdminVoid;
+  const isVoided        = job.status === 'voided';
+  const isComplete      = job.status === 'complete';
+  const isApprovedPlus  = ['approved','in_progress','complete','voided'].includes(job.status);
+
+  // Button visibility rules:
+  // Approve   → only if pending, and canApprove, not voided
+  // In Progress → only if approved, and canApprove
+  // Complete  → only if in_progress, and canApprove
+  // Void      → only if complete, and canAdminVoid (admin/super can void completed jobs)
+  // Edit      → only if draft or pending (locked once approved)
+
+  const appBtn  = document.getElementById('inst-view-approve-btn');
+  const proBtn  = document.getElementById('inst-view-progress-btn');
+  const comBtn  = document.getElementById('inst-view-complete-btn');
+  const voidBtn = document.getElementById('inst-view-void-btn');
+  const editBtn = document.getElementById('inst-view-edit-btn');
+
+  if (appBtn)  appBtn.style.display  = (canApprove && job.status === 'pending')    ? '' : 'none';
+  if (proBtn)  proBtn.style.display  = (canApprove && job.status === 'approved')   ? '' : 'none';
+  if (comBtn)  comBtn.style.display  = (canApprove && job.status === 'in_progress')? '' : 'none';
+  if (voidBtn) voidBtn.style.display = (canAdminVoid && isComplete && !isVoided)   ? '' : 'none';
+  if (editBtn) editBtn.style.display = (!isApprovedPlus)                           ? '' : 'none';
+
+  document.getElementById('modal-inst-view').classList.add('active');
+};
+
+window.closeInstallationViewModal = function() {
+  document.getElementById('modal-inst-view').classList.remove('active');
+  _instViewId = null;
+};
+
+// ── Change status (approve / in_progress / complete) ──
+window.changeInstallationStatus = async function(newStatus) {
+  if (!_instViewId) return;
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can update the job status.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+
+  const labelMap = { approved:'APPROVED', in_progress:'IN PROGRESS', complete:'COMPLETE' };
+  if (!confirm(`Mark this installation job as ${labelMap[newStatus] || newStatus.toUpperCase()}?`)) return;
+
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'installations', _instViewId), {
+      status: newStatus,
+      updatedAt: fb.serverTimestamp()
+    });
+    const job = INST_ACTIVE_CHUNK.find(j => j.id === _instViewId);
+    if (job) job.status = newStatus;
+    showToast('Status updated to ' + (labelMap[newStatus] || newStatus.toUpperCase()) + '.');
+    closeInstallationViewModal();
+    renderInstallationTable(INST_ACTIVE_CHUNK);
+    updateInstStats(INST_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not update status: ' + (err.message||err));
+  }
+};
+
+// ── Void a complete job (admin / super admin only) ──
+window.voidInstallationJob = async function() {
+  if (!_instViewId) return;
+  const role = window._currentRole || 'user';
+  if (role !== 'admin' && role !== 'super') {
+    showToast('⚠ Only Admin or Super Admin can void a completed installation job.');
+    return;
+  }
+  const job = INST_ACTIVE_CHUNK.find(j => j.id === _instViewId);
+  if (!job) return;
+  if (job.status !== 'complete') {
+    showToast('⚠ Only completed jobs can be voided.');
+    return;
+  }
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+
+  const reason = prompt('Reason for voiding this installation job (required):');
+  if (reason === null) return;
+  if (!reason.trim()) { showToast('⚠ A reason is required to void a job.'); return; }
+  if (!confirm('This will permanently mark the job as VOIDED. Continue?')) return;
+
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'installations', _instViewId), {
+      status:    'voided',
+      voidedBy:   role,
+      voidReason: reason.trim(),
+      voidedAt:   fb.serverTimestamp(),
+      updatedAt:  fb.serverTimestamp()
+    });
+    if (job) { job.status = 'voided'; job.voidReason = reason.trim(); job.voidedBy = role; }
+    showToast('Installation job voided.');
+    closeInstallationViewModal();
+    renderInstallationTable(INST_ACTIVE_CHUNK);
+    updateInstStats(INST_ACTIVE_CHUNK);
+  } catch(err) {
+    showToast('⚠ Could not void job: ' + (err.message||err));
+  }
+};
+
+// ════════════════════════════════════════════════════════════════
+
+function buildAndPrintQuote(q) {
+  const rows = (q.items||[]).map(function(it,i){
+    return '<tr>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:center;">'+(i+1)+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;">'+(it.name||'')+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;color:#666;">'+(it.desc||'-')+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:center;">'+it.qty+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:right;">&#8369;'+fmtCur(it.unitPrice)+'</td>'
+      + '<td style="border:1px solid #ddd;padding:8px;text-align:right;font-weight:600;">&#8369;'+fmtCur(it.lineTotal)+'</td>'
+      + '</tr>';
+  }).join('');
+
+  const discRow  = q.discount ? '<tr><td style="color:#666;">Discount</td><td style="text-align:right;">-&#8369;'+fmtCur(q.discount)+'</td></tr>' : '';
+  const vatRow   = q.vat      ? '<tr><td style="color:#666;">VAT (12%)</td><td style="text-align:right;">&#8369;'+fmtCur(q.vat)+'</td></tr>' : '';
+  const notesRow = q.notes    ? '<div style="background:#f5f5f5;padding:12px 16px;font-size:12px;border-left:3px solid #c00;"><b>Notes:</b> '+q.notes+'</div>' : '';
+  const contactLine = (q.contact ? '<div>'+q.contact+'</div>' : '') + (q.email ? '<div>'+q.email+'</div>' : '');
+  const issued = new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'});
+
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { showToast('Pop-up blocked. Please allow pop-ups for printing.'); return; }
+
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
+  w.document.write('<title>Quotation '+(q.quoteId||'')+'</title>');
+  w.document.write('<style>');
+  w.document.write('body{font-family:Arial,sans-serif;font-size:13px;color:#222;margin:0;padding:32px;}');
+  w.document.write('h1{font-size:22px;letter-spacing:2px;margin:0 0 4px;}');
+  w.document.write('table{width:100%;border-collapse:collapse;margin-bottom:16px;}');
+  w.document.write('th{background:#222;color:#fff;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
+  w.document.write('.totals td{border:none;padding:5px 8px;}');
+  w.document.write('@media print{body{padding:0;}}');
+  w.document.write('<\/style><\/head><body>');
+
+  w.document.write('<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;border-bottom:3px solid #c00;padding-bottom:16px;">');
+  w.document.write('<div><h1>QUOTATION</h1><div style="font-size:12px;color:#888;letter-spacing:1px;">ERPB - ENTERPRISE RESOURCE PLANNING BUILDER</div></div>');
+  w.document.write('<div style="text-align:right;font-size:12px;">');
+  w.document.write('<div style="font-size:18px;font-weight:700;color:#c00;">'+(q.quoteId||'DRAFT')+'</div>');
+  w.document.write('<div>Issued: '+issued+'</div>');
+  w.document.write('<div>Valid Until: '+(q.validUntil||'-')+'</div>');
+  w.document.write('</div></div>');
+
+  w.document.write('<div style="display:flex;justify-content:space-between;margin-bottom:24px;">');
+  w.document.write('<div><div style="font-size:10px;letter-spacing:1px;color:#888;text-transform:uppercase;margin-bottom:4px;">Bill To</div>');
+  w.document.write('<div style="font-weight:700;font-size:15px;">'+(q.client||'-')+'</div>'+contactLine+'</div>');
+  w.document.write('<div style="text-align:right;font-size:12px;">');
+  w.document.write('<div><b>Prepared by:</b> '+(q.preparedBy||'-')+'</div>');
+  w.document.write('<div><b>Payment Terms:</b> '+(q.payTerms||q.paymentTerms||'-')+'</div>');
+  w.document.write('</div></div>');
+
+  w.document.write('<table><thead><tr>');
+  w.document.write('<th>#</th><th>Item</th><th>Description</th><th style="text-align:center;">Qty</th><th style="text-align:right;">Unit Price</th><th style="text-align:right;">Total</th>');
+  w.document.write('</tr></thead><tbody>'+rows+'</tbody></table>');
+
+  w.document.write('<div style="display:flex;justify-content:flex-end;margin-bottom:20px;">');
+  w.document.write('<table style="width:260px;" class="totals">');
+  w.document.write('<tr><td style="color:#666;">Subtotal</td><td style="text-align:right;">&#8369;'+fmtCur(q.subtotal)+'</td></tr>');
+  w.document.write(discRow + vatRow);
+  w.document.write('<tr style="border-top:2px solid #222;"><td style="font-weight:700;font-size:14px;">TOTAL</td><td style="font-weight:700;font-size:14px;text-align:right;color:#2e7d32;">&#8369;'+fmtCur(q.total)+'</td></tr>');
+  w.document.write('</table></div>');
+  w.document.write(notesRow);
+  w.document.write('<div style="margin-top:40px;font-size:11px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:12px;">This quotation is valid until '+(q.validUntil||'-')+' - ERPB System Generated</div>');
+
+  // Inject auto-print via DOM (no script tag in string)
+  var s = w.document.createElement('script');
+  s.textContent = 'window.onload=function(){window.print();}';
+  w.document.body.appendChild(s);
+
+  w.document.write('<\/body><\/html>');
+  w.document.close();
+}
+</script>
