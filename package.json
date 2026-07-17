@@ -1,0 +1,19 @@
+{
+  "name": "zkteco-attendance-server",
+  "version": "1.0.0",
+  "description": "Node.js bridge between ZKTeco SDK and browser UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npx nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.3",
+    "node-zklib": "^1.0.0",
+    "zkteco-js": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
