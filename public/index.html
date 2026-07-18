@@ -255,6 +255,9 @@
         const reasonTxt = tx.voidReason ? ` — "${tx.voidReason}"` : '';
         const tip = `${who}${when ? ' on ' + when : ''}${reasonTxt}`.replace(/"/g, '&quot;');
         statusCell = `<span class="badge-void" title="${tip}">VOIDED</span>`;
+        if (window._currentRole === 'super') {
+          statusCell += ` <button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;color:#ef5350;border-color:rgba(239,83,80,0.4);margin-left:4px;" onclick="event.stopPropagation(); deleteVoidedSale('${tx.firestoreId}')">Delete</button>`;
+        }
       } else if (canVoid) {
         statusCell = `<button class="void-btn" onclick="event.stopPropagation(); voidSale('${tx.firestoreId}')" title="Void this transaction">Void</button>`;
       } else {
@@ -421,6 +424,29 @@
       window.showToast('⚠ Failed to void transaction. Please try again.');
     } finally {
       if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Confirm Void'; }
+    }
+  };
+
+  // ── Permanently delete a VOIDED sale record (Super Admin only) ──
+  window.deleteVoidedSale = async function(firestoreId) {
+    if (window._currentRole !== 'super') { window.showToast('Super Admin only.'); return; }
+    const tx = (window.SALES_ACTIVE_CHUNK || []).find(t => t.firestoreId === firestoreId);
+    if (!tx) { window.showToast('Could not locate that transaction record.'); return; }
+    if (!tx.voided) { window.showToast('Only voided transactions can be deleted.'); return; }
+    if (!confirm(`Permanently delete voided transaction #${tx.txId}? This cannot be undone.`)) return;
+
+    const fb = window._fb;
+    if (!fb) { window.showToast('Firebase connection unavailable.'); return; }
+
+    try {
+      await fb.deleteDoc(fb.doc(fb.db, 'sales', firestoreId));
+      window.SALES_ACTIVE_CHUNK = (window.SALES_ACTIVE_CHUNK || []).filter(t => t.firestoreId !== firestoreId);
+      renderSalesLogRecordsTable(SALES_ACTIVE_CHUNK);
+      updateSalesStatsCards(SALES_ACTIVE_CHUNK);
+      window.showToast('Voided transaction #' + tx.txId + ' deleted.');
+    } catch (err) {
+      console.error('Delete voided sale failed:', err);
+      window.showToast('⚠ Failed to delete transaction. Please try again.');
     }
   };
 
@@ -1680,6 +1706,22 @@ body.app-running #screen-app   { display:flex !important; }
       Finds Inventory records that share the exact same Model AND Brand Name — the usual sign that the same product got entered more than once.
     </div>
     <div id="dupe-check-body" style="max-height:60vh;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ══════════════ SALES ↔ SERIAL RECONCILIATION MODAL ══════════════ -->
+<div id="modal-sales-serial-recon" class="modal-overlay" onclick="if(event.target===this)closeSalesSerialReconModal()">
+  <div class="modal-card modal-xl">
+    <div class="modal-title">
+      🔍 &nbsp;Sales ⇄ Serial Reconciliation
+      <button class="modal-close" onclick="closeSalesSerialReconModal()">✕</button>
+    </div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;">
+      Compares serial numbers picked on completed (non-voided) sales against their actual status in Inventory, and flags any serial that's still showing
+      "In Stock" (or another non-Sold status) even though a receipt was printed for it. This can happen if the status update at checkout failed to save —
+      the sale still goes through, but the inventory record is left stale. Click "Mark Sold" to correct it.
+    </div>
+    <div id="sales-serial-recon-body" style="max-height:60vh;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -2979,6 +3021,12 @@ body.app-running #screen-app   { display:flex !important; }
             style="background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.78rem;font-family:var(--mono);outline:none;min-width:170px;">
             <option value="">— All Branches (Combined) —</option>
           </select>
+          <select id="inv-stock-sort" onchange="invStockSort=this.value;renderInventory()"
+            style="background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.78rem;font-family:var(--mono);outline:none;min-width:170px;">
+            <option value="">Sort: Default</option>
+            <option value="desc">Stock: Highest → Lowest</option>
+            <option value="asc">Stock: Lowest → Highest</option>
+          </select>
           <button id="inv-add-btn" onclick="plShowAddForm('inv')"
             style="background:var(--red);color:#fff;border:none;padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;">
             + Add Item
@@ -2990,6 +3038,10 @@ body.app-running #screen-app   { display:flex !important; }
           <button onclick="openDuplicateCheckModal()"
             style="background:transparent;color:#f59e0b;border:1px solid rgba(245,158,11,0.35);padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;">
             ⧉ Check Duplicates
+          </button>
+          <button onclick="openSalesSerialReconModal()" title="Find serials that were sold on a receipt but still show In Stock in inventory"
+            style="background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.35);padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;">
+            🔍 Reconcile Sales ⇄ Serials
           </button>
           <button id="inv-transfer-requests-btn" onclick="openTransferRequestsModal()" style="display:none;position:relative;background:rgba(255,167,38,0.1);color:#ffa726;border:1px solid rgba(255,167,38,0.35);padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;align-items:center;gap:6px;">
             🔔 Transfer Requests
@@ -3450,6 +3502,7 @@ body.app-running #screen-app   { display:flex !important; }
             <button class="btn btn-red" id="qt-view-approve-btn" onclick="changeQuotationStatus('approved')" style="flex:1; min-width:130px;">✔ Mark Approved</button>
             <button class="qa-btn" id="qt-view-reject-btn" onclick="changeQuotationStatus('rejected')" style="padding:10px 18px; flex-shrink:0; color:var(--red);">✘ Mark Rejected</button>
             <button class="qa-btn" id="qt-view-void-btn" onclick="voidQuotation()" style="padding:10px 18px; flex-shrink:0; color:#9c27b0; border-color:#9c27b0; display:none;">⊘ Void</button>
+            <button class="qa-btn" id="qt-view-delete-btn" onclick="deleteVoidedQuotation(_qtViewId)" style="padding:10px 18px; flex-shrink:0; color:#ef5350; border-color:rgba(239,83,80,0.4); display:none;">🗑 Delete</button>
             <button class="qa-btn" id="qt-view-edit-btn" onclick="editCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">✎ Edit</button>
             <button class="qa-btn" onclick="printCurrentQuotation()" style="padding:10px 18px; flex-shrink:0;">🖨 Print</button>
             <button class="btn btn-ghost" onclick="closeQuotationViewModal()" style="width:100px; margin:0;">Close</button>
@@ -5331,7 +5384,7 @@ function initApp(){
   const tbPrintHeaderSel = document.getElementById('tb-print-header');
   if(tbPrintHeaderSel) tbPrintHeaderSel.value = PRINT_HEADER_CHOICE;
 
-  loadStocksFromFirestore().then(()=>{
+  const stocksReadyPromise = loadStocksFromFirestore().then(()=>{
     // Refresh any open inventory/pricelist views once data arrives
     const invPage = document.getElementById('page-inventory');
     if(invPage && invPage.classList.contains('active')) renderInventory();
@@ -5342,7 +5395,7 @@ function initApp(){
     // from live serials data so any stale cached numbers (e.g. left over
     // from status changes made before per-branch syncing existed) get
     // corrected automatically, then repaint if the Inventory view is open.
-    syncSerializedStockFromFirestore().then(()=>{
+    return syncSerializedStockFromFirestore().then(()=>{
       const invPageNow = document.getElementById('page-inventory');
       if(invPageNow && invPageNow.classList.contains('active')) renderInventory();
     });
@@ -5412,9 +5465,10 @@ function initApp(){
   if(payrollRatesBtn) payrollRatesBtn.style.display = currentRole === 'super' ? 'inline-flex' : 'none';
 
   // Reimbursements nav — visible to all roles
-  // Admin panel on the page visible only to superadmin
+  // Admin panel on the page visible to Admin and Super Admin (Admin has
+  // view/add-acknowledgement access, but approve/reject/void stay Super-only)
   const reimbAdminPanel = document.getElementById('reimb-admin-panel');
-  if(reimbAdminPanel) reimbAdminPanel.style.display = currentRole === 'super' ? 'block' : 'none';
+  if(reimbAdminPanel) reimbAdminPanel.style.display = (currentRole === 'super' || currentRole === 'admin') ? 'block' : 'none';
 
   // Load reimbursements from Firestore
   loadReimbFromFirestore();
@@ -5448,7 +5502,18 @@ function initApp(){
   buildBarChart();
   buildActivity();
   loadMyProfile();
-  loadSalesFromFirestore();
+  const salesReadyPromise = loadSalesFromFirestore();
+
+  // Auto-heal serials that were sold on a completed sale but never got
+  // flipped to "sold" in Inventory (e.g. the status write at checkout
+  // failed) — runs quietly on login once both Inventory and Sales data are
+  // in, so staff don't have to notice a missed toast or remember to open
+  // the reconciliation tool manually. Only privileged roles actually write
+  // corrections; everyone else's login just leaves it as-is for an admin
+  // to run later via the Reconcile Sales ⇄ Serials button.
+  Promise.all([stocksReadyPromise, salesReadyPromise]).then(()=>{
+    if(currentRole === 'admin' || currentRole === 'super') autoFixSalesSerialMismatches();
+  });
 
   showToast('Signed in as ' + rl.toUpperCase() + (email ? ' (' + email + ')' : ''));
 }
@@ -5688,6 +5753,7 @@ let PRICELIST = [];
 let nextProdId = 1;
 let plFilter = '';
 let invFilter = '';
+let invStockSort = ''; // '' = default order, 'desc' = highest stock first, 'asc' = lowest stock first
 let invBranchFilter = ''; // '' = All Branches (Combined); otherwise a branch name from BRANCHES_CACHE
 let stocksLoaded = false;
 
@@ -6092,7 +6158,7 @@ function removeSalesLine(idx){
 // so all existing price/stock/serial logic keeps working unchanged.
 let _prodSuggestOwner = null; // key of the input currently "owning" the shared portal
 
-function renderProdSuggestions(ownerKey, inputEl, query, onPick){
+function renderProdSuggestions(ownerKey, inputEl, query, onPick, branch){
   const box = document.getElementById('prod-suggest-portal');
   if(!box || !inputEl) return;
   _prodSuggestOwner = ownerKey;
@@ -6114,12 +6180,18 @@ function renderProdSuggestions(ownerKey, inputEl, query, onPick){
     box.innerHTML = `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted);font-family:var(--mono);">No matching items</div>`;
   } else {
     box.innerHTML = matches.map(p=>{
-      const stockLabel = p.stock === 999 ? '∞' : p.stock;
+      // If a branch is selected on the form, show THAT branch's stock —
+      // not the combined all-branches total — so staff aren't shown stock
+      // that's actually sitting at a different location and can't really
+      // be sold from here.
+      const rawStock = branch ? (parseInt((p.branches||{})[branch]) || 0) : p.stock;
+      const stockLabel = p.stock === 999 ? '∞' : rawStock;
+      const stockSuffix = branch ? ` @ ${branch}` : '';
       const label = p.name + (p.model ? ' [' + p.model + ']' : '');
       return `<div onmousedown="__prodSuggestionPick('${ownerKey}','${p.id}')"
         style="padding:7px 12px;cursor:pointer;font-size:0.8rem;border-bottom:1px solid var(--border2);">
         <div style="font-weight:600;">${label} (${p.unit||'pc'})</div>
-        <div style="font-size:0.7rem;color:var(--text-muted);">₱${fmt(p.price||0)} — Stock: ${stockLabel}</div>
+        <div style="font-size:0.7rem;color:var(--text-muted);">₱${fmt(p.price||0)} — Stock: ${stockLabel}${stockSuffix}</div>
       </div>`;
     }).join('');
   }
@@ -6148,7 +6220,8 @@ function hideProdSuggestions(ownerKey){
   _prodSuggestOwner = null;
 }
 function filterSalesProdSuggestions(idx, inputEl){
-  renderProdSuggestions('sales-'+idx, inputEl, inputEl.value, (prodId)=> onSalesProdChange(idx, prodId));
+  const branch = document.getElementById('sale-branch')?.value || '';
+  renderProdSuggestions('sales-'+idx, inputEl, inputEl.value, (prodId)=> onSalesProdChange(idx, prodId), branch);
 }
 function filterPOProdSuggestions(idx, inputEl){
   renderProdSuggestions('po-'+idx, inputEl, inputEl.value, (prodId)=> onPOProdChange(idx, prodId));
@@ -6633,33 +6706,316 @@ async function markSoldSerialsForSale(tx){
       prod.branches = updatedBranches;
     } catch(e){
       console.error('Failed to mark serials sold for', prod.id, e);
-      showToast('⚠ Sale saved, but updating serial status failed for ' + prod.name);
+      showToast('⚠ Sale saved, but updating serial status failed for ' + prod.name + '. Use Inventory → 🔍 Reconcile Sales ⇄ Serials to fix it.', 8000);
+      logActivity({ text: `⚠ Sale ${tx.id} saved, but marking serial(s) sold failed for ${prod.name} — use Reconcile Sales ⇄ Serials in Inventory to fix.`, type:'inventory', green:false });
     }
   }
   renderInventory();
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  SALES ↔ SERIAL RECONCILIATION
+//  markSoldSerialsForSale() runs right after a sale is submitted, but it's
+//  a separate write from the sale itself — if that write fails (network
+//  hiccup, a permissions rule rejecting it, etc.) the sale still completes
+//  and prints a receipt with the serial listed on it, while the serial's
+//  actual Firestore status is left however it was before (usually still
+//  "in_stock"). This tool finds that drift across every completed
+//  (non-voided) sale and lets an admin correct it with one click, instead
+//  of relying on someone spotting the one-time toast when it first failed.
+// ═══════════════════════════════════════════════════════════════
+let _lastSalesSerialReport = [];
+
+// Fetches the full serials list for a product (Firestore-backed products query
+// their 'serials' subcollection; local-only/offline-demo products read from
+// the in-memory _serialsList instead).
+async function fetchProductSerials(prod){
+  const fb = window._fb;
+  if(!prod) return [];
+  if(!fb || String(prod.id).startsWith('local')){
+    return (prod._serialsList||[]).map((s,i)=>({ id: 'local-'+i, ...s }));
+  }
+  try{
+    const snap = await fb.getDocs(fb.collection(fb.db,'stocks',prod.id,'serials'));
+    return snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  } catch(e){
+    console.warn('Could not fetch serials for', prod.id, e);
+    return [];
+  }
+}
+
+// Recomputes a single product's stockQty/branches from its live serials —
+// the same recompute markSoldSerialsForSale() does, factored out so the
+// reconciliation fix-up below (and anything else that flips one serial's
+// status after the fact) can reuse it without duplicating the logic.
+async function recomputeProductStockFromSerials(prod){
+  const fb = window._fb;
+  if(!fb || String(prod.id).startsWith('local')){
+    const list = prod._serialsList || [];
+    prod.stock = list.filter(x=>x.status==='in_stock').length + (parseInt(prod.pendingQty)||0);
+    const branchCounts = {};
+    list.forEach(s=>{
+      const br = s.branch || '';
+      if(!br) return;
+      if(!(br in branchCounts)) branchCounts[br] = 0;
+      if(s.status==='in_stock') branchCounts[br]++;
+    });
+    prod.branches = { ...(prod.branches||{}), ...branchCounts };
+    return;
+  }
+  try{
+    const snap = await fb.getDocs(fb.collection(fb.db,'stocks',prod.id,'serials'));
+    const inStockCount = snap.docs.filter(d=>d.data().status==='in_stock').length;
+    const branchCounts = {};
+    snap.docs.forEach(d=>{
+      const data = d.data();
+      const br = data.branch || '';
+      if(!br) return;
+      if(!(br in branchCounts)) branchCounts[br] = 0;
+      if(data.status === 'in_stock') branchCounts[br]++;
+    });
+    const pendingBranches = prod.pendingBranches || {};
+    const updatedBranches = { ...(prod.branches||{}), ...branchCounts };
+    Object.keys(pendingBranches).forEach(br => {
+      updatedBranches[br] = (parseInt(branchCounts[br]) || 0) + (parseInt(pendingBranches[br]) || 0);
+    });
+    const combinedStock = inStockCount + (parseInt(prod.pendingQty)||0);
+    await fb.updateDoc(fb.doc(fb.db,'stocks',prod.id), { stockQty: combinedStock, branches: updatedBranches });
+    prod.stock = combinedStock;
+    prod.branches = updatedBranches;
+  } catch(e){
+    console.warn('Could not recompute stock for', prod.id, e);
+  }
+}
+
+// Walks every completed, non-voided sale, looks at the serial(s) recorded on
+// each line item, and checks their CURRENT status in Inventory. Anything not
+// actually "sold" (still in_stock, reserved, etc., or the serial doc is
+// missing entirely) gets flagged. Serials are grouped by product first so
+// each product's serials subcollection is only fetched once no matter how
+// many sales/lines reference it.
+async function buildSalesSerialMismatchReport(){
+  const rows = [];
+  const activeSales = (SALES_LOG||[]).filter(tx => !tx.voided);
+
+  const byProduct = new Map(); // prodId -> [{ serialId, serialLabel, sale }]
+  activeSales.forEach(tx=>{
+    (tx.items||[]).forEach(it=>{
+      if(!it.prodId || !it.serials || !it.serials.length) return;
+      if(!byProduct.has(it.prodId)) byProduct.set(it.prodId, []);
+      it.serials.forEach(sel=>{
+        if(!sel || !sel.id) return;
+        byProduct.get(it.prodId).push({ serialId: sel.id, serialLabel: sel.serial || sel.id, sale: tx });
+      });
+    });
+  });
+
+  for(const [prodId, refs] of byProduct){
+    const prod = PRICELIST.find(p=>p.id===prodId);
+    if(!prod) continue; // product itself no longer exists — nothing to reconcile against
+    const liveSerials = await fetchProductSerials(prod);
+    const liveById = new Map(liveSerials.map(s=>[s.id, s]));
+    refs.forEach(ref=>{
+      const live = liveById.get(ref.serialId);
+      if(!live){
+        rows.push({ prod, serialId: ref.serialId, serialLabel: ref.serialLabel, sale: ref.sale, liveStatus: 'missing' });
+      } else if(live.status !== 'sold'){
+        rows.push({ prod, serialId: ref.serialId, serialLabel: ref.serialLabel, sale: ref.sale, liveStatus: live.status || 'unknown' });
+      }
+    });
+  }
+  rows.sort((a,b)=> a.prod.name.localeCompare(b.prod.name) || new Date(b.sale.date||0) - new Date(a.sale.date||0));
+  return rows;
+}
+
+function openSalesSerialReconModal(){
+  const m = document.getElementById('modal-sales-serial-recon');
+  if(!m) return;
+  m.classList.add('active');
+  renderSalesSerialReconModal();
+}
+function closeSalesSerialReconModal(){
+  const m = document.getElementById('modal-sales-serial-recon');
+  if(m) m.classList.remove('active');
+}
+
+async function renderSalesSerialReconModal(){
+  const body = document.getElementById('sales-serial-recon-body');
+  if(!body) return;
+  body.innerHTML = `<div style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">SCANNING SALES RECORDS…</div>`;
+
+  _lastSalesSerialReport = await buildSalesSerialMismatchReport();
+
+  if(!_lastSalesSerialReport.length){
+    body.innerHTML = `<div style="text-align:center;padding:24px;color:#22c55e;font-family:var(--mono);font-size:0.78rem;">✓ Every serial picked on a completed sale is correctly marked Sold in Inventory.</div>`;
+    return;
+  }
+
+  const statusColor = { in_stock:'#22c55e', reserved:'#ffa726', defective:'#ef5350', missing:'#9333ea', unknown:'var(--text-muted)' };
+
+  body.innerHTML = `<div style="margin-bottom:12px;padding:10px 12px;background:rgba(239,83,80,0.08);border-left:3px solid #ef5350;font-size:0.78rem;">
+    <strong>⚠ ${_lastSalesSerialReport.length} serial(s) were sold on a completed sale but Inventory still shows them as something other than Sold.</strong>
+    This usually means the status update at checkout failed to save. Click "Mark Sold" on each row to correct it — this also refreshes that product's stock count.
+  </div>
+  <table class="po-table" style="width:100%;">
+    <thead><tr>
+      <th>Product</th>
+      <th>Serial #</th>
+      <th>Sale Ref #</th>
+      <th>Customer</th>
+      <th>Sale Date</th>
+      <th style="text-align:center;">Current Status</th>
+      <th style="text-align:center;">Action</th>
+    </tr></thead>
+    <tbody>
+      ${_lastSalesSerialReport.map((r,i)=>`<tr>
+        <td style="font-weight:500;">${r.prod.name}${r.prod.model?` <span style="color:var(--text-muted);font-size:0.72rem;">[${r.prod.model}]</span>`:''}</td>
+        <td class="mono" style="font-weight:700;">${r.serialLabel}</td>
+        <td class="mono">${r.sale.id||'—'}</td>
+        <td>${r.sale.customer||'—'}</td>
+        <td class="mono" style="font-size:0.72rem;color:var(--text-muted);">${r.sale.date||'—'}</td>
+        <td style="text-align:center;font-family:var(--mono);font-size:0.72rem;color:${statusColor[r.liveStatus]||'var(--text-muted)'};">${r.liveStatus==='missing' ? 'NO SERIAL RECORD' : r.liveStatus.toUpperCase()}</td>
+        <td style="text-align:center;">${r.liveStatus==='missing'
+          ? `<span style="font-family:var(--mono);font-size:0.62rem;color:var(--text-muted);">Can't fix — record not found</span>`
+          : `<button onclick="fixSalesSerialMismatch(${i})" style="background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:3px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);">MARK SOLD</button>`}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+async function fixSalesSerialMismatch(idx){
+  const row = _lastSalesSerialReport[idx];
+  if(!row) return;
+  const { prod, serialId, serialLabel, sale } = row;
+
+  if(!confirm(`Mark serial "${serialLabel}" (${prod.name}) as SOLD to ${sale.customer||'—'} — matching sale ${sale.id||''}?`)) return;
+
+  const fb = window._fb;
+  if(!fb || String(prod.id).startsWith('local')){
+    const s = (prod._serialsList||[]).find((x,i)=> ('local-'+i)===serialId);
+    if(s){ s.status='sold'; s.soldTo=sale.customer||''; s.soldAt=null; }
+  } else {
+    try{
+      await fb.updateDoc(fb.doc(fb.db,'stocks',prod.id,'serials',serialId), {
+        status:'sold', soldTo: sale.customer||'', soldAt: fb.serverTimestamp()
+      });
+    } catch(e){
+      showToast('⚠ Could not update serial: ' + (e.code||e.message||e), 6000);
+      return;
+    }
+  }
+
+  await recomputeProductStockFromSerials(prod);
+  logActivity({ text: `Reconciled: serial ${serialLabel} (${prod.name}) marked Sold to match sale ${sale.id||''}`, type:'inventory', green:true });
+  showToast(`✓ ${serialLabel} marked sold.`);
+
+  _lastSalesSerialReport.splice(idx,1);
+  renderSalesSerialReconModal();
+  renderInventory();
+}
+
+// Same fix as fixSalesSerialMismatch() above, but applied automatically to
+// every fixable mismatch with no per-row confirmation — used on login so
+// stuck serials get corrected without anyone having to notice and open the
+// reconciliation tool. "missing" rows (no serial record found at all) are
+// left alone since there's nothing safe to auto-write for those; they'll
+// still show up if an admin opens the manual tool.
+async function autoFixSalesSerialMismatches(){
+  let report;
+  try{
+    report = await buildSalesSerialMismatchReport();
+  } catch(e){
+    console.warn('Sales↔Serial auto-reconciliation scan failed:', e);
+    return;
+  }
+  const fixable = report.filter(r => r.liveStatus !== 'missing');
+  if(!fixable.length) return;
+
+  const fb = window._fb;
+  let fixedCount = 0;
+  for(const row of fixable){
+    const { prod, serialId, serialLabel, sale } = row;
+    try{
+      if(!fb || String(prod.id).startsWith('local')){
+        const s = (prod._serialsList||[]).find((x,i)=> ('local-'+i)===serialId);
+        if(s){ s.status='sold'; s.soldTo=sale.customer||''; s.soldAt=null; }
+      } else {
+        await fb.updateDoc(fb.doc(fb.db,'stocks',prod.id,'serials',serialId), {
+          status:'sold', soldTo: sale.customer||'', soldAt: fb.serverTimestamp()
+        });
+      }
+      await recomputeProductStockFromSerials(prod);
+      logActivity({ text: `Auto-reconciled: serial ${serialLabel} (${prod.name}) marked Sold to match sale ${sale.id||''}`, type:'inventory', green:true });
+      fixedCount++;
+    } catch(e){
+      console.warn('Auto-fix failed for serial', serialId, e);
+    }
+  }
+
+  if(fixedCount){
+    showToast(`✓ Auto-fixed ${fixedCount} serial(s) that were sold but still showed as available.`, 7000);
+    const invPage = document.getElementById('page-inventory');
+    if(invPage && invPage.classList.contains('active')) renderInventory();
+  }
+}
+
 // Deducts `qty` from a quantity-tracked (non-serialized) product's combined
 // stock and from its per-branch stock for `branch`. Persists to Firestore
-// when available. Clamps at 0 so stock never goes negative.
+// when available.
+//
+// IMPORTANT: this does NOT clamp at 0. If a sale is recorded while stock is
+// insufficient (an oversold/backorder situation), the stock is allowed to go
+// negative so that debt is preserved. That way, when new stock later comes
+// in through a Purchase Order (which always does serverStock + qty, see PO
+// approval code), the oversold amount is automatically netted out instead of
+// silently vanishing — e.g. -72 (oversold) + 100 (new PO stock) = 28 actually
+// available, instead of wrongly showing all 100 as available.
+//
+// Also runs as an atomic transaction (same guarantee the PO approval flow
+// uses) rather than writing an absolute number computed from the local
+// PRICELIST cache, since that cache can be stale (another sale/PO/edit landed
+// a moment ago) and blindly overwriting with a stale-derived total could
+// silently apply the wrong deduction.
 async function deductQtyStockForSale(prod, branch, qty){
   if(!prod || !qty) return;
   const fb = window._fb;
 
-  const newCombined = Math.max(0, (parseInt(prod.stock)||0) - qty);
-  const updatedBranches = { ...(prod.branches||{}) };
-  if(branch){
-    const currentBranchQty = (updatedBranches[branch] !== undefined) ? (parseInt(updatedBranches[branch])||0) : 0;
-    updatedBranches[branch] = Math.max(0, currentBranchQty - qty);
+  if(!fb || String(prod.id).startsWith('local')){
+    // Local-only product — no server copy to race against, safe to compute directly.
+    const newCombined = (parseInt(prod.stock)||0) - qty;
+    const updatedBranches = { ...(prod.branches||{}) };
+    if(branch){
+      const currentBranchQty = (updatedBranches[branch] !== undefined) ? (parseInt(updatedBranches[branch])||0) : 0;
+      updatedBranches[branch] = currentBranchQty - qty;
+    }
+    prod.stock = newCombined;
+    prod.branches = updatedBranches;
+    return;
   }
 
-  prod.stock = newCombined;
-  prod.branches = updatedBranches;
-
-  if(!fb || String(prod.id).startsWith('local')) return;
-
+  const stockDocRef = fb.doc(fb.db, 'stocks', prod.id);
   try{
-    await fb.updateDoc(fb.doc(fb.db,'stocks',prod.id), { stockQty: newCombined, branches: updatedBranches });
+    let txResult = null;
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(stockDocRef);
+      if(!snap.exists()) throw new Error('Inventory item no longer exists in database');
+      const server = snap.data();
+      const serverStock    = typeof server.stockQty === 'number' ? server.stockQty : 0;
+      const serverBranches = server.branches ? { ...server.branches } : {};
+
+      const newCombined = serverStock - qty;
+      const updatedBranches = { ...serverBranches };
+      if(branch){
+        const currentBranchQty = (updatedBranches[branch] !== undefined) ? (parseInt(updatedBranches[branch])||0) : 0;
+        updatedBranches[branch] = currentBranchQty - qty;
+      }
+
+      tx.update(stockDocRef, { stockQty: newCombined, branches: updatedBranches });
+      txResult = { newCombined, updatedBranches };
+    });
+
+    prod.stock = txResult.newCombined;
+    prod.branches = txResult.updatedBranches;
   } catch(e){
     console.error('Failed to deduct stock for', prod.id, e);
     showToast('⚠ Sale saved, but updating stock quantity failed for ' + prod.name);
@@ -7197,6 +7553,16 @@ function renderProductTable(px){
   // column shown), falling back to the brand name for items with no model.
   if(px==='pl'){
     rows.sort((a,b)=>(a.model||a.name||'').localeCompare(b.model||b.name||''));
+  }
+  // Inventory: optional sort by stock level (highest→lowest or lowest→highest),
+  // using whatever stock figure is currently being displayed (branch-specific
+  // if a branch filter is active, otherwise the combined total). Overrides the
+  // default alphabetical/insertion order when a sort direction is chosen.
+  if(px==='inv' && invStockSort){
+    rows.sort((a,b)=>{
+      const sa = branchStock(a,px), sb = branchStock(b,px);
+      return invStockSort==='desc' ? sb - sa : sa - sb;
+    });
   }
   const isSA = currentRole === 'super';
   const isAdmin = currentRole === 'admin' || isSA;
@@ -10147,7 +10513,8 @@ async function loadReimbFromFirestore(){
   if(!user) return;
   try {
     let snap;
-    if(currentRole === 'super'){
+    const isReimbAdminView = (currentRole === 'super' || currentRole === 'admin');
+    if(isReimbAdminView){
       snap = await fb.getDocs(fb.collection(fb.db, 'reimbursements'));
       ALL_REIMBS = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       MY_REIMBS  = ALL_REIMBS.filter(r => r.uid === user.uid);
@@ -10163,7 +10530,7 @@ async function loadReimbFromFirestore(){
     const pending = ALL_REIMBS.filter(r => r.status === 'pending').length;
     const navBadge = document.getElementById('badge-reimb-nav');
     if(navBadge){
-      if(currentRole === 'super' && pending > 0){
+      if(isReimbAdminView && pending > 0){
         navBadge.textContent = pending;
         navBadge.style.display = 'inline';
       } else {
@@ -10175,7 +10542,7 @@ async function loadReimbFromFirestore(){
     const page = document.getElementById('page-reimbursements');
     if(page && page.classList.contains('active')){
       renderMyReimbTable();
-      if(currentRole === 'super') renderReimbAdminTable();
+      if(isReimbAdminView) renderReimbAdminTable();
     }
   } catch(e){
     console.warn('Could not load reimbursements:', e);
@@ -10305,7 +10672,8 @@ function renderReimbAdminTable(){
       : `<button onclick="openReimbDetail('${r.id}')" class="qa-btn" style="padding:4px 10px;font-size:0.62rem;">VIEW</button>`;
     // Any reimbursement (pending, approved, or rejected) can be voided by the
     // Super Admin at any point, separately from the normal approve/reject flow.
-    const voidBtn = (status !== 'voided')
+    // Admin can view/add acknowledgements but doesn't get the Void action.
+    const voidBtn = (status !== 'voided' && currentRole === 'super')
       ? `<button onclick="voidReimb('${r.id}', this)" class="qa-btn" style="padding:4px 10px;font-size:0.62rem;margin-left:4px;background:transparent;color:#6b7280;border:1px solid var(--border2);cursor:pointer;font-family:var(--mono);">VOID</button>`
       : '';
     return `<tr>
@@ -10360,17 +10728,18 @@ function newReimb(){
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  MANUAL ACKNOWLEDGEMENT (Super Admin only)
+//  MANUAL ACKNOWLEDGEMENT (Admin or Super Admin)
 // ═══════════════════════════════════════════════════════════════
-// A lightweight, amount-only entry point for the Super Admin to manually
+// A lightweight, amount-only entry point for Admin/Super Admin to manually
 // log a fund acknowledgement (Replenish) without going through the full
-// receipt/category/purpose form — since only the Super Admin can create
-// these, there's nothing else that needs collecting. It posts straight
-// into the pending-approval queue (immediately reflected in the "For
-// Acknowledgement" total) and can be voided by the Super Admin at any time.
+// receipt/category/purpose form — there's nothing else that needs
+// collecting. It posts straight into the pending-approval queue
+// (immediately reflected in the "For Acknowledgement" total) and, like any
+// pending item, still requires Super Admin approve/reject. Only the Super
+// Admin can void it at any time.
 
 function openAckModal(){
-  if(currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const amtEl = document.getElementById('ack-amount');
   if(amtEl) amtEl.value = '';
   const msgEl = document.getElementById('ack-form-msg');
@@ -10383,8 +10752,8 @@ function openAckModal(){
 }
 
 // ── Fills the branch dropdown on the Add Acknowledgement modal so the ──
-// Super Admin can pick which branch this fund acknowledgement applies to,
-// instead of it silently defaulting to their own assigned branch.
+// Admin/Super Admin can pick which branch this fund acknowledgement applies
+// to, instead of it silently defaulting to their own assigned branch.
 function populateAckBranchSelect(){
   const sel = document.getElementById('ack-branch');
   if(!sel) return;
@@ -10405,7 +10774,7 @@ function closeAckModal(){
 }
 
 async function submitAck(){
-  if(currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const msgEl = document.getElementById('ack-form-msg');
   const setMsg = (html, type='error') => { msgEl.innerHTML = `<div class="msg msg-${type}">${html}</div>`; };
 
@@ -10728,7 +11097,7 @@ function viewMyReimbDetail(id){
 
 // ── Super Admin: open detail for review ──
 function openReimbDetail(id){
-  if(currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const r = ALL_REIMBS.find(x=>x.id===id);
   if(!r) return;
   const status = r.status||'pending';
@@ -10759,19 +11128,27 @@ function openReimbDetail(id){
   `;
 
   const actDiv = document.getElementById('reimb-detail-actions');
+  const isSuperReviewer = currentRole === 'super';
   // Any reimbursement can be voided by the Super Admin, at any point, unless
-  // it's already voided.
-  const canVoid = (status !== 'voided');
+  // it's already voided. Approve / Reject / Void all stay Super Admin only —
+  // Admin can view and add acknowledgements, but final sign-off is Super's.
+  const canVoid = (status !== 'voided') && isSuperReviewer;
   const voidBtnHtml = canVoid
     ? `<button class="btn btn-ghost" onclick="voidReimb('${id}', this)" style="flex:1;margin:0;border-color:var(--border2);color:#6b7280;">Void</button>`
     : '';
-  if(status==='pending'){
+  if(status==='pending' && isSuperReviewer){
     actDiv.innerHTML = `
       <button class="btn btn-red" onclick="approveReimb('${id}', this)" style="flex:1;">✓ Approve</button>
       <button class="btn btn-ghost" onclick="rejectReimb('${id}', this)" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
       ${voidBtnHtml}
       <button class="btn btn-ghost" onclick="printReimbVoucher('${id}')" style="width:100px;margin:0;">🖨 Print</button>
       <button class="btn btn-ghost" onclick="closeReimbDetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if(status==='pending' && !isSuperReviewer){
+    actDiv.innerHTML = `
+      <div style="flex:1;font-size:0.76rem;color:var(--text-muted);font-family:var(--mono);display:flex;align-items:center;">Pending Super Admin approval.</div>
+      <button class="btn btn-ghost" onclick="printReimbVoucher('${id}')" style="width:140px;margin:0;">🖨 Print</button>
+      <button class="btn btn-ghost" onclick="closeReimbDetail()" style="width:140px;margin:0;">Close</button>
     `;
   } else {
     actDiv.innerHTML = `
@@ -16617,6 +16994,7 @@ async function renderQuotationTable(list) {
       <td style="text-align:center;">${statusBadge(qt.status)}</td>
       <td style="text-align:center;" onclick="event.stopPropagation();">
         ${(qt.status === 'draft' || qt.status === 'rejected') ? `<button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;" onclick="editQuotationById('${qt.id}')">Edit</button>` : ''}
+        ${(qt.status === 'voided' && window._currentRole === 'super') ? `<button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;color:#ef5350;border-color:rgba(239,83,80,0.4);" onclick="deleteVoidedQuotation('${qt.id}')">Delete</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -17188,10 +17566,12 @@ async function viewQuotation(firestoreId) {
   const appBtn = document.getElementById('qt-view-approve-btn');
   const rejBtn = document.getElementById('qt-view-reject-btn');
   const voidBtn = document.getElementById('qt-view-void-btn');
+  const deleteBtn = document.getElementById('qt-view-delete-btn');
   const editBtn = document.getElementById('qt-view-edit-btn');
   if (appBtn) appBtn.style.display = (isVoided || qt.status === 'approved') ? 'none' : '';
   if (rejBtn) rejBtn.style.display = (isVoided || qt.status === 'rejected') ? 'none' : '';
   if (voidBtn) voidBtn.style.display = (canVoidOrApprove && !isVoided) ? '' : 'none';
+  if (deleteBtn) deleteBtn.style.display = (role === 'super' && isVoided) ? '' : 'none';
   // Edit is only allowed for draft/rejected quotations — locked once pending or approved
   const canEdit = (qt.status === 'draft' || qt.status === 'rejected');
   if (editBtn) editBtn.style.display = canEdit ? '' : 'none';
@@ -17290,6 +17670,32 @@ async function voidQuotation() {
     }
   });
 }
+
+// ── Permanently delete a VOIDED quotation (Super Admin only) ──
+window.deleteVoidedQuotation = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  const qt = QT_ACTIVE_CHUNK.find(q => q.id === id);
+  if (!qt) { showToast('Could not locate that quotation.'); return; }
+  if (qt.status !== 'voided') { showToast('Only voided quotations can be deleted.'); return; }
+  if (!confirm(`Permanently delete voided quotation ${qt.quoteId || id}? This cannot be undone.`)) return;
+
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase not available.'); return; }
+
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'quotations', id));
+    QT_ACTIVE_CHUNK = QT_ACTIVE_CHUNK.filter(q => q.id !== id);
+    if (typeof closeQuotationViewModal === 'function') closeQuotationViewModal();
+    renderQuotationTable(QT_ACTIVE_CHUNK);
+    updateQtStats(QT_ACTIVE_CHUNK);
+    showToast('Voided quotation deleted.');
+  } catch (err) {
+    console.error('Delete voided quotation failed:', err);
+    showToast('⚠ Failed to delete quotation. Please try again.');
+  }
+};
+
+
 
 function closeQuotationViewModal() {
   document.getElementById('modal-qt-view').classList.remove('active');
@@ -21015,6 +21421,7 @@ function renderLeaveAdminTable() {
       <td style="text-align:center;"><span class="leave-status ${l.status||'pending'}">${l.status||'pending'}</span></td>
       <td style="text-align:center;">
         <button onclick="openLeaveDetail('${l.id}')" style="background:var(--red);color:#fff;border:none;padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;">REVIEW</button>
+        <button onclick="deleteLeave('${l.id}')" style="background:transparent;border:1px solid rgba(239,83,80,0.35);color:#ef5350;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;margin-left:4px;">DELETE</button>
       </td>
     </tr>`;
   }).join('');
@@ -21535,6 +21942,23 @@ async function loadMyLeaveSummary() {
 }
 
 
+// Derive the next lve-XXXXXXXX ref number from requests currently on record,
+// so deleting/cancelling requests frees up their numbers again. Also guards
+// against any collision by bumping the number up until it's free.
+function nextLeaveRefNo() {
+  const existing = [...(ALL_LEAVES || []), ...(MY_LEAVES || [])].map(l => l.refNo).filter(Boolean);
+  const refSet = new Set(existing);
+  let max = 0;
+  existing.forEach(r => {
+    const n = parseInt(String(r).replace(/\D/g, ''), 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  let n = max + 1;
+  let ref = 'lve-' + String(n).padStart(8, '0');
+  while (refSet.has(ref)) { n++; ref = 'lve-' + String(n).padStart(8, '0'); }
+  return ref;
+}
+
 // ── Open / close file modal ─────────────────────────────────────
 window.openLeaveModal = function() {
   document.getElementById('leave-form-wrap').style.display    = '';
@@ -21545,8 +21969,7 @@ window.openLeaveModal = function() {
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('leave-days-display').textContent = '—';
   // Generate ref
-  const ref = 'lve-' + String(leaveCounter++).padStart(8,'0');
-  document.getElementById('leave-ref-no').value = ref;
+  document.getElementById('leave-ref-no').value = nextLeaveRefNo();
   const btn = document.getElementById('leave-submit-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Submit Application'; }
   document.getElementById('modal-leave').classList.add('active');
@@ -21714,7 +22137,13 @@ function _renderLeaveDetailModal(l, canReview) {
     actDiv.innerHTML = `
       <button class="btn btn-red" onclick="approveLeave('${l.id}')" style="flex:1;">✓ Approve</button>
       <button class="btn btn-ghost" id="leave-show-reject-btn" onclick="showLeaveRejectForm('${l.id}')" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
+      <button class="btn btn-ghost" onclick="deleteLeave('${l.id}')" style="width:120px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
       <button class="btn btn-ghost" onclick="closeLeaveDetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if (window._currentRole === 'super') {
+    actDiv.innerHTML = `
+      <button class="btn btn-ghost" onclick="deleteLeave('${l.id}')" style="width:140px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeLeaveDetail()" style="width:140px;margin:0;">Close</button>
     `;
   } else {
     actDiv.innerHTML = `<button class="btn btn-ghost" onclick="closeLeaveDetail()" style="width:140px;margin:0;">Close</button>`;
@@ -21798,6 +22227,23 @@ window.rejectLeave = async function(id) {
 };
 
 // ── Cancel (applicant withdraws pending request) ────────────────
+window.deleteLeave = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (!confirm('Delete this leave application permanently? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'leaveRequests', id));
+    ALL_LEAVES = ALL_LEAVES.filter(l => l.id !== id);
+    MY_LEAVES  = MY_LEAVES.filter(l => l.id !== id);
+    closeLeaveDetail();
+    renderMyLeaveTable();
+    renderLeaveAdminTable();
+    updateLeaveNavBadge();
+    showToast('Leave application deleted.');
+  } catch(e) { showToast('Error: ' + (e.message || e)); }
+};
+
 window.cancelLeave = async function(id) {
   if (!confirm('Cancel this leave application? This cannot be undone.')) return;
   const fb   = window._fb;
@@ -21923,6 +22369,7 @@ function renderOTAdminTable() {
       <td style="text-align:center;"><span class="leave-status ${o.status||'pending'}">${o.status||'pending'}</span></td>
       <td style="text-align:center;">
         <button onclick="openOTDetail('${o.id}')" style="background:var(--red);color:#fff;border:none;padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;">REVIEW</button>
+        <button onclick="deleteOT('${o.id}')" style="background:transparent;border:1px solid rgba(239,83,80,0.35);color:#ef5350;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;margin-left:4px;">DELETE</button>
       </td>
     </tr>`;
   }).join('');
@@ -21934,6 +22381,23 @@ function updateOTNavBadge() {
   if (badge) { badge.textContent = pending; badge.style.display = pending > 0 ? 'inline' : 'none'; }
 }
 
+// Derive the next ot-XXXXXXXX ref number from requests currently on record,
+// so deleting/cancelling requests frees up their numbers again. Also guards
+// against any collision by bumping the number up until it's free.
+function nextOTRefNo() {
+  const existing = [...(ALL_OT || []), ...(MY_OT || [])].map(o => o.refNo).filter(Boolean);
+  const refSet = new Set(existing);
+  let max = 0;
+  existing.forEach(r => {
+    const n = parseInt(String(r).replace(/\D/g, ''), 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  let n = max + 1;
+  let ref = 'ot-' + String(n).padStart(8, '0');
+  while (refSet.has(ref)) { n++; ref = 'ot-' + String(n).padStart(8, '0'); }
+  return ref;
+}
+
 window.openOTModal = function() {
   document.getElementById('ot-form-wrap').style.display    = '';
   document.getElementById('ot-confirm-wrap').style.display = 'none';
@@ -21941,8 +22405,7 @@ window.openOTModal = function() {
   ['ot-date','ot-time-from','ot-time-to','ot-reason']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('ot-hours-display').textContent = '—';
-  const ref = 'ot-' + String(otCounter++).padStart(8,'0');
-  document.getElementById('ot-ref-no').value = ref;
+  document.getElementById('ot-ref-no').value = nextOTRefNo();
   const btn = document.getElementById('ot-submit-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Submit for Approval'; }
   document.getElementById('modal-ot').classList.add('active');
@@ -22095,7 +22558,13 @@ function _renderOTDetailModal(o, canReview) {
     actDiv.innerHTML = `
       <button class="btn btn-red" onclick="approveOT('${o.id}')" style="flex:1;">✓ Approve</button>
       <button class="btn btn-ghost" onclick="showOTRejectForm('${o.id}')" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
+      <button class="btn btn-ghost" onclick="deleteOT('${o.id}')" style="width:120px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
       <button class="btn btn-ghost" onclick="closeOTDetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if (window._currentRole === 'super') {
+    actDiv.innerHTML = `
+      <button class="btn btn-ghost" onclick="deleteOT('${o.id}')" style="width:140px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeOTDetail()" style="width:140px;margin:0;">Close</button>
     `;
   } else {
     actDiv.innerHTML = `<button class="btn btn-ghost" onclick="closeOTDetail()" style="width:140px;margin:0;">Close</button>`;
@@ -22173,6 +22642,23 @@ window.rejectOT = async function(id) {
     prependActivity({ text: actText, green: false });
     if (typeof logActivity === 'function') logActivity({ text: actText, type: 'ot_rejected', green: false });
     showToast('Overtime request rejected.');
+  } catch(e) { showToast('Error: ' + (e.message || e)); }
+};
+
+window.deleteOT = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (!confirm('Delete this overtime request permanently? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'overtimeRequests', id));
+    ALL_OT = ALL_OT.filter(o => o.id !== id);
+    MY_OT  = MY_OT.filter(o => o.id !== id);
+    closeOTDetail();
+    renderMyOTTable();
+    renderOTAdminTable();
+    updateOTNavBadge();
+    showToast('Overtime request deleted.');
   } catch(e) { showToast('Error: ' + (e.message || e)); }
 };
 
@@ -22338,6 +22824,7 @@ function renderWOHAdminTable() {
       <td style="text-align:center;"><span class="leave-status ${w.status||'pending'}">${w.status||'pending'}</span></td>
       <td style="text-align:center;">
         <button onclick="openWOHDetail('${w.id}')" style="background:var(--red);color:#fff;border:none;padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;">REVIEW</button>
+        <button onclick="deleteWOH('${w.id}')" style="background:transparent;border:1px solid rgba(239,83,80,0.35);color:#ef5350;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;margin-left:4px;">DELETE</button>
       </td>
     </tr>`;
   }).join('');
@@ -22349,6 +22836,24 @@ function updateWOHNavBadge() {
   if (badge) { badge.textContent = pending; badge.style.display = pending > 0 ? 'inline' : 'none'; }
 }
 
+// Derive the next woh-XXXXXXXX ref number from the requests currently on
+// record, so that deleting requests frees up their numbers again (e.g. if
+// every WOH request is deleted, the next one starts back at woh-00000001).
+// Also guards against any collision by bumping the number up until it's free.
+function nextWOHRefNo() {
+  const existing = [...(ALL_WOH || []), ...(MY_WOH || [])].map(w => w.refNo).filter(Boolean);
+  const refSet = new Set(existing);
+  let max = 0;
+  existing.forEach(r => {
+    const n = parseInt(String(r).replace(/\D/g, ''), 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  let n = max + 1;
+  let ref = 'woh-' + String(n).padStart(8, '0');
+  while (refSet.has(ref)) { n++; ref = 'woh-' + String(n).padStart(8, '0'); }
+  return ref;
+}
+
 window.openWOHModal = function() {
   document.getElementById('woh-form-wrap').style.display    = '';
   document.getElementById('woh-confirm-wrap').style.display = 'none';
@@ -22356,8 +22861,7 @@ window.openWOHModal = function() {
   ['woh-date','woh-holiday-name','woh-holiday-type','woh-time-from','woh-time-to','woh-reason']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('woh-hours-display').textContent = '—';
-  const ref = 'woh-' + String(wohCounter++).padStart(8,'0');
-  document.getElementById('woh-ref-no').value = ref;
+  document.getElementById('woh-ref-no').value = nextWOHRefNo();
   const btn = document.getElementById('woh-submit-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Submit for Approval'; }
   document.getElementById('modal-woh').classList.add('active');
@@ -22518,7 +23022,13 @@ function _renderWOHDetailModal(w, canReview) {
     actDiv.innerHTML = `
       <button class="btn btn-red" onclick="approveWOH('${w.id}')" style="flex:1;">✓ Approve</button>
       <button class="btn btn-ghost" onclick="showWOHRejectForm('${w.id}')" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
+      <button class="btn btn-ghost" onclick="deleteWOH('${w.id}')" style="width:120px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
       <button class="btn btn-ghost" onclick="closeWOHDetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if (window._currentRole === 'super') {
+    actDiv.innerHTML = `
+      <button class="btn btn-ghost" onclick="deleteWOH('${w.id}')" style="width:140px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeWOHDetail()" style="width:140px;margin:0;">Close</button>
     `;
   } else {
     actDiv.innerHTML = `<button class="btn btn-ghost" onclick="closeWOHDetail()" style="width:140px;margin:0;">Close</button>`;
@@ -22599,6 +23109,23 @@ window.rejectWOH = async function(id) {
   } catch(e) { showToast('Error: ' + (e.message || e)); }
 };
 
+window.deleteWOH = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (!confirm('Delete this Work on Holiday request permanently? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'holidayWorkRequests', id));
+    ALL_WOH = ALL_WOH.filter(w => w.id !== id);
+    MY_WOH  = MY_WOH.filter(w => w.id !== id);
+    closeWOHDetail();
+    renderMyWOHTable();
+    renderWOHAdminTable();
+    updateWOHNavBadge();
+    showToast('Work on Holiday request deleted.');
+  } catch(e) { showToast('Error: ' + (e.message || e)); }
+};
+
 window.cancelWOH = async function(id) {
   if (!confirm('Cancel this work on holiday request? This cannot be undone.')) return;
   const fb   = window._fb;
@@ -22652,8 +23179,21 @@ function obApplicantName(ob) {
 }
 
 // ── Generate OB Ref Number ──
+// Derives the next ob-XXXXXXXX ref number from requests currently on record,
+// so deleting/cancelling requests frees up their numbers again. Also guards
+// against any collision by bumping the number up until it's free.
 function generateOBRefNo() {
-  return 'ob-' + String(obCounter++).padStart(8, '0');
+  const existing = [...(ALL_OB || []), ...(MY_OB || [])].map(o => o.refNo).filter(Boolean);
+  const refSet = new Set(existing);
+  let max = 0;
+  existing.forEach(r => {
+    const n = parseInt(String(r).replace(/\D/g, ''), 10);
+    if (!isNaN(n) && n > max) max = n;
+  });
+  let n = max + 1;
+  let ref = 'ob-' + String(n).padStart(8, '0');
+  while (refSet.has(ref)) { n++; ref = 'ob-' + String(n).padStart(8, '0'); }
+  return ref;
 }
 
 // ── Load page (called from showPage) ──
@@ -22700,7 +23240,37 @@ async function loadOBFromFirestore() {
   }
 }
 
-// ── Open / Close Modal ──
+// ── One-time cleanup: renumber every existing OB request sequentially ──
+// (fixes duplicate/legacy ref numbers left over from before the ref-number
+// fix was applied). Renumbers oldest → newest as ob-00000001, ob-00000002, …
+window.fixOBRefNumbers = async function() {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (!confirm('Renumber ALL Official Business ref numbers sequentially by filing date? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'officialBusinessRequests'));
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+
+    let n = 1;
+    for (const d of docs) {
+      const newRef = 'ob-' + String(n).padStart(8, '0');
+      if (d.refNo !== newRef) {
+        await fb.updateDoc(fb.doc(fb.db, 'officialBusinessRequests', d.id), { refNo: newRef });
+      }
+      n++;
+    }
+
+    await loadOBFromFirestore();
+    renderMyOBTable();
+    renderOBAdminTable();
+    updateOBNavBadge();
+    showToast(`Renumbered ${docs.length} Official Business request(s) ✓`);
+  } catch(e) { showToast('Error: ' + (e.message || e)); }
+};
+
+
 window.openOBModal = function() {
   // Reset form
   ['ob-destination','ob-purpose','ob-transport','ob-budget','ob-log-type'].forEach(id => {
@@ -23011,7 +23581,8 @@ function renderOBAdminTable() {
         <td style="text-align:center;"><span class="leave-status ${ob.status||'pending'}">${ob.status||'pending'}</span></td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn btn-ghost" onclick="printOBSlip('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0 4px 0 0;">🖨 Print</button>
-          <button class="btn btn-ghost" onclick="openOBDetail('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0;">Review</button>
+          <button class="btn btn-ghost" onclick="openOBDetail('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0 4px 0 0;">Review</button>
+          <button class="btn btn-ghost" onclick="deleteOB('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0;color:#ef5350;border-color:rgba(239,83,80,0.4);">Delete</button>
         </td>
       </tr>
     `;
@@ -23093,7 +23664,14 @@ function _renderOBDetailModal(ob, canReview) {
       <button class="btn btn-ghost" onclick="printOBSlip('${ob.id}')" style="width:120px;margin:0;">🖨 Print</button>
       <button class="btn btn-red" onclick="approveOB('${ob.id}')" style="flex:1;">✓ Approve Trip</button>
       <button class="btn btn-ghost" onclick="showOBRejectForm('${ob.id}')" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
+      <button class="btn btn-ghost" onclick="deleteOB('${ob.id}')" style="width:120px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
       <button class="btn btn-ghost" onclick="closeOBDetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if (window._currentRole === 'super') {
+    actDiv.innerHTML = `
+      <button class="btn btn-ghost" onclick="printOBSlip('${ob.id}')" style="width:140px;margin:0;">🖨 Print</button>
+      <button class="btn btn-ghost" onclick="deleteOB('${ob.id}')" style="width:140px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeOBDetail()" style="width:140px;margin:0;">Close</button>
     `;
   } else {
     actDiv.innerHTML = `
@@ -23180,6 +23758,23 @@ window.rejectOB = async function(id) {
 };
 
 // ── Cancel OB (applicant, pending only) ──
+window.deleteOB = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (!confirm('Delete this Official Business Trip request permanently? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'officialBusinessRequests', id));
+    ALL_OB = ALL_OB.filter(o => o.id !== id);
+    MY_OB  = MY_OB.filter(o => o.id !== id);
+    closeOBDetail();
+    renderMyOBTable();
+    renderOBAdminTable();
+    updateOBNavBadge();
+    showToast('Official Business Trip request deleted.');
+  } catch(e) { showToast('Error: ' + (e.message || e)); }
+};
+
 window.cancelOB = async function(id) {
   if (!confirm('Cancel this Official Business Trip request? This cannot be undone.')) return;
   const fb   = window._fb;
