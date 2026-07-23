@@ -4258,9 +4258,9 @@ body.app-running #screen-app   { display:flex !important; }
             <div class="stat-card-sub">Pending "Request" items awaiting payout</div>
           </div>
           <div class="stat-card" style="border-top-color:#0277bd;">
-            <div class="stat-card-label">Amount to Fund In</div>
+            <div class="stat-card-label">Remaining Balance</div>
             <div class="stat-card-val neutral" id="reimb-stat-fundin">₱0.00</div>
-            <div class="stat-card-sub">Shortfall if pending releases exceed the balance</div>
+            <div class="stat-card-sub">Running Balance minus Amount to Release</div>
           </div>
           <div class="stat-card" style="border-top-color:var(--text-muted);">
             <div class="stat-card-label">For Acknowledgement</div>
@@ -4297,7 +4297,8 @@ body.app-running #screen-app   { display:flex !important; }
         <div class="panel" id="reimb-admin-panel" style="display:none;">
           <div class="panel-title" style="margin-bottom:14px;">All Requests — Pending Approval
             <span id="reimb-pending-count" style="margin-left:8px;background:var(--red);color:#fff;padding:2px 8px;font-family:var(--mono);font-size:0.62rem;"></span>
-            <button onclick="openAckModal()" style="margin-left:auto;background:transparent;color:var(--text);border:1px solid var(--border2);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ Add Acknowledgement</button>
+            <button id="reimb-fix-branches-btn" onclick="migrateReimbBranchBackfill()" style="margin-left:auto;background:transparent;color:var(--text);border:1px solid var(--border2);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;display:none;" title="One-time fix: freezes the branch on old reimbursement records so they stop following the applicant when their profile branch changes">⚑ Fix Legacy Branches</button>
+            <button onclick="openAckModal()" style="background:transparent;color:var(--text);border:1px solid var(--border2);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ Add Acknowledgement</button>
           </div>
           <div class="reimb-filter-bar">
             <input type="text" id="reimb-search" placeholder="Search by name, purpose, or ref#…" style="flex:1;min-width:180px;" oninput="renderReimbAdminTable()"/>
@@ -5539,6 +5540,8 @@ function initApp(){
   // view/add-acknowledgement access, but approve/reject/void stay Super-only)
   const reimbAdminPanel = document.getElementById('reimb-admin-panel');
   if(reimbAdminPanel) reimbAdminPanel.style.display = (currentRole === 'super' || currentRole === 'admin') ? 'block' : 'none';
+  const reimbFixBranchesBtn = document.getElementById('reimb-fix-branches-btn');
+  if(reimbFixBranchesBtn) reimbFixBranchesBtn.style.display = currentRole === 'super' ? 'inline-block' : 'none';
 
   // Load reimbursements from Firestore
   loadReimbFromFirestore();
@@ -10986,6 +10989,57 @@ function reimbApplicantBranch(r){
   return (r && r.uid && REIMB_USER_BRANCHES[r.uid]) || '—';
 }
 
+// ── One-time migration: freezes a branch onto any reimbursement record ──
+// that was saved before the `branch` field existed on the document. Those
+// legacy records currently fall back to the applicant's LIVE profile
+// branch (see reimbApplicantBranch above), which means transferring a user
+// to a new branch silently "moves" all of their old reimbursements along
+// with them in every total/filter. Writing `branch` onto the record itself
+// freezes it going forward — only future reimbursements will follow a
+// user's next branch transfer. Super Admin only, safe to run more than
+// once (it skips any record that already has a branch saved). ──
+async function migrateReimbBranchBackfill(){
+  if(currentRole !== 'super'){ showToast('Access restricted — Super Admin required.'); return; }
+
+  const legacy = ALL_REIMBS.filter(r => !r.branch);
+  if(!legacy.length){ showToast('Nothing to fix — every reimbursement already has a branch on record.'); return; }
+
+  const ok = confirm(
+    `${legacy.length} reimbursement record(s) don't have a branch saved yet, so they currently ` +
+    `follow each applicant's CURRENT profile branch. This will permanently stamp each one with the ` +
+    `applicant's branch as it stands right now.\n\n` +
+    `After this, transferring a user to a new branch will only affect their FUTURE reimbursements — ` +
+    `these ${legacy.length} record(s) will stay put.\n\n` +
+    `Proceed?`
+  );
+  if(!ok) return;
+
+  const btn = document.getElementById('reimb-fix-branches-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Fixing…'; }
+
+  const fb = window._fb;
+  let fixed = 0, skipped = 0;
+
+  try {
+    for(const r of legacy){
+      const branch = REIMB_USER_BRANCHES[r.uid];
+      if(!branch){ skipped++; continue; } // applicant has no branch on their profile either — leave as '—'
+      await fb.updateDoc(fb.doc(fb.db, 'reimbursements', r.id), { branch });
+      r.branch = branch; // keep local cache in sync so the UI reflects it immediately
+      fixed++;
+    }
+    renderReimbAdminTable();
+    renderMyReimbTable();
+    renderReimbSummary();
+    showToast(`Fixed ${fixed} record(s).${skipped ? ' ' + skipped + ' skipped (applicant has no branch set).' : ''}`);
+  } catch(e){
+    console.warn('migrateReimbBranchBackfill failed:', e);
+    showToast('Migration failed partway — check console. Records already fixed are safe; re-run to continue with the rest.');
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = '⚑ Fix Legacy Branches'; }
+  }
+}
+
 // ── Running Balance for a single branch, or the combined total across every
 // branch when no branch is given (used for the "All Branches" view).
 // Computed LIVE from the actual reimbursement records every time, rather
@@ -11192,16 +11246,19 @@ function renderReimbSummary(){
     if(status === 'pending' && type === 'Replenish') ackTotal      += amt;
   });
   const runningBalance = reimbBranchBalance(reimbBranchFilter); // per-branch fund, or combined total across all branches
-  // "Amount to Fund In" is how much MORE money needs to be added to cover
-  // pending releases — a shortfall figure. It should be 0 whenever the
-  // balance already covers pending releases (including when there's
-  // nothing pending to release at all), and only turn positive once
-  // pending releases exceed what's currently in the fund.
-  const fundInTotal    = Math.max(0, releaseTotal - runningBalance);
+  // "Remaining Balance" = Running Balance minus Amount to Release. This treats
+  // approved and pending Requests the same way: approved Requests already
+  // reduced runningBalance, and pending Requests (releaseTotal) are subtracted
+  // here — so both count against the balance as if already paid out. Unlike
+  // "Amount to Fund In" before it, this is NOT floored at 0: it can go negative
+  // to show an actual deficit once pending releases exceed what's on hand.
+  const fundInTotal    = runningBalance - releaseTotal;
 
   document.getElementById('reimb-stat-balance').textContent = '₱' + fmt2(runningBalance);
   document.getElementById('reimb-stat-release').textContent = '₱' + fmt2(releaseTotal);
-  document.getElementById('reimb-stat-fundin').textContent  = '₱' + fmt2(fundInTotal);
+  const fundInEl = document.getElementById('reimb-stat-fundin');
+  fundInEl.textContent = '₱' + fmt2(fundInTotal);
+  fundInEl.style.color = fundInTotal < 0 ? 'var(--red)' : '';
   document.getElementById('reimb-stat-ack').textContent     = '₱' + fmt2(ackTotal);
 }
 
