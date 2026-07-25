@@ -41,8 +41,16 @@
     limit,
     startAfter,
     runTransaction,
-    increment
+    increment,
+    deleteField
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import {
+    getStorage,
+    ref as storageRef,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
  const firebaseConfig = {
   apiKey: "AIzaSyCIRKidWZ5D-5PQ5Sb1qJ1HXFEyDlf-vY8",
@@ -54,16 +62,18 @@
 };
   // ─────────────────────────────────────────────────────────────
 
-  const app  = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db   = getFirestore(app);
+  const app     = initializeApp(firebaseConfig);
+  const auth    = getAuth(app);
+  const db      = getFirestore(app);
+  const storage = getStorage(app);
 
   // ── Expose helpers to global scope so inline onclick="" can call them ──
-  window._fb = { auth, db, app, _config: firebaseConfig, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
+  window._fb = { auth, db, app, storage, _config: firebaseConfig, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
                  sendSignInLinkToEmail, isSignInWithEmailLink,
                  signInWithEmailLink, onAuthStateChanged,
                  doc, setDoc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, collection, collectionGroup, serverTimestamp,
-                 query, where, orderBy, limit, startAfter, runTransaction, increment };
+                 query, where, orderBy, limit, startAfter, runTransaction, increment, deleteField,
+                 storageRef, uploadBytes, getDownloadURL, deleteObject };
 
   // ── Persistent auto-login until manual logout ──
   // browserLocalPersistence keeps the user signed in across page refreshes, tab closes,
@@ -1208,7 +1218,7 @@ body.app-running #screen-app   { display:flex !important; }
 }
 .profile-avatar{
   width:76px;height:76px;background:linear-gradient(135deg,var(--red),#6d8bff);border-radius:18px;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
   font-family:var(--sans);font-size:1.6rem;color:#fff;font-weight:800;flex-shrink:0;
 }
 .profile-name{font-family:var(--sans);font-size:1.25rem;font-weight:800;letter-spacing:-0.01em;margin-bottom:4px;}
@@ -12587,6 +12597,10 @@ function renderHRGrid(list){
     const branch   = emp.branch   || '—';
     const jobTitle = emp.jobTitle || '—';
     const email    = emp.email    || '—';
+    const photoURL = emp.photoURL || '';
+    const avatarInner = photoURL
+      ? `<img src="${photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
     return `
       <div ${isSuperHR ? `onclick="openEmpProfile('${emp.id}')"` : ''} style="
         background:var(--card);border:1px solid var(--border2);padding:18px 16px;
@@ -12597,9 +12611,9 @@ function renderHRGrid(list){
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="
             width:42px;height:42px;background:var(--red-dim);border:1px solid var(--red-border);
-            display:flex;align-items:center;justify-content:center;
+            display:flex;align-items:center;justify-content:center;overflow:hidden;
             font-family:var(--mono);font-size:0.9rem;font-weight:700;color:var(--red);flex-shrink:0;
-          ">${initials}</div>
+          ">${avatarInner}</div>
           <div style="min-width:0;">
             <div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
             <div style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${email}</div>
@@ -13566,7 +13580,14 @@ async function openEmpProfile(uid){
     const role     = d.role || 'user';
 
     // ── Header ──
-    const av = document.getElementById('emp-avatar'); if(av) av.textContent = initials;
+    const av = document.getElementById('emp-avatar');
+    if(av) av.innerHTML = d.photoURL
+      ? `<img src="${d.photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
+    const uploadBtn = document.getElementById('emp-avatar-upload-btn');
+    if(uploadBtn) uploadBtn.style.display = (window._currentRole === 'super') ? 'flex' : 'none';
+    const deleteBtn0 = document.getElementById('emp-avatar-delete-btn');
+    if(deleteBtn0) deleteBtn0.style.display = (window._currentRole === 'super' && d.photoURL) ? 'flex' : 'none';
     set('emp-modal-name', name);
     const meta = document.getElementById('emp-modal-meta');
     if(meta) meta.innerHTML = `${d.branch||'—'} Branch &nbsp;&middot;&nbsp; ${d.jobTitle||'—'}`;
@@ -13627,6 +13648,141 @@ async function openEmpProfile(uid){
     showToast('Could not load employee profile.');
     console.warn('openEmpProfile failed:', e);
     closeEmpProfile();
+  }
+}
+
+// Resize + re-encode an image file client-side before it ever reaches Storage,
+// so a multi-MB phone photo doesn't get stored (and served) at full size.
+// Downscales to fit within maxDim x maxDim and re-encodes as JPEG.
+function resizeImageFile(file, maxDim = 400, quality = 0.82){
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        if(width >= height){ height = Math.round(height * (maxDim / width)); width = maxDim; }
+        else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => {
+        if(!blob){ reject(new Error('Could not process image.')); return; }
+        resolve(blob);
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Could not read image file.')); };
+    img.src = objectUrl;
+  });
+}
+
+async function handleEmpPhotoSelected(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = ''; // reset so selecting the same file again still fires onchange
+  if(!file) return;
+
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const uid = window._viewingEmpUid;
+  if(!uid){ showToast('No employee selected.'); return; }
+
+  if(!file.type.startsWith('image/')){ showToast('Please select an image file.'); return; }
+  if(file.size > 10 * 1024 * 1024){ showToast('Image must be smaller than 10MB.'); return; }
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const av = document.getElementById('emp-avatar');
+  const btn = document.getElementById('emp-avatar-upload-btn');
+  const prevAvatarHTML = av ? av.innerHTML : '';
+  if(av) av.innerHTML = `<span style="font-size:0.6rem;font-family:var(--mono);">…</span>`;
+  if(btn) btn.style.pointerEvents = 'none';
+
+  try {
+    // Downscale + compress to a small JPEG (~400px, ~80% quality) before upload
+    // so avatars only ever cost a few KB of Storage instead of the original MBs.
+    let uploadBlob;
+    try {
+      uploadBlob = await resizeImageFile(file, 400, 0.82);
+    } catch(resizeErr){
+      console.warn('Image resize failed, uploading original file instead:', resizeErr);
+      uploadBlob = file;
+    }
+
+    const path = `employee-photos/${uid}/photo.jpg`;
+    const fileRef = fb.storageRef(fb.storage, path);
+    await fb.uploadBytes(fileRef, uploadBlob, { contentType: 'image/jpeg' });
+    const url = await fb.getDownloadURL(fileRef);
+
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), { photoURL: url });
+
+    // Update local cache so the HR grid + this modal reflect the change immediately
+    const cached = HR_ALL_EMPLOYEES.find(e => e.id === uid);
+    if(cached) cached.photoURL = url;
+
+    if(av) av.innerHTML = `<img src="${url}" alt="Employee photo" style="width:100%;height:100%;object-fit:cover;" />`;
+    const deleteBtnAfterUpload = document.getElementById('emp-avatar-delete-btn');
+    if(deleteBtnAfterUpload) deleteBtnAfterUpload.style.display = 'flex';
+    if(typeof renderHRGrid === 'function') renderHRGrid(HR_ALL_EMPLOYEES);
+    showToast('Photo updated.');
+  } catch(e){
+    console.warn('handleEmpPhotoSelected failed:', e);
+    if(av) av.innerHTML = prevAvatarHTML;
+    showToast('Could not upload photo.');
+  } finally {
+    if(btn) btn.style.pointerEvents = '';
+  }
+}
+
+async function deleteEmpPhoto(){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const uid = window._viewingEmpUid;
+  if(!uid){ showToast('No employee selected.'); return; }
+
+  const cached = HR_ALL_EMPLOYEES.find(e => e.id === uid);
+  if(!cached || !cached.photoURL){ showToast('No photo to remove.'); return; }
+
+  if(!confirm('Remove this employee\'s photo? This cannot be undone.')) return;
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const deleteBtn = document.getElementById('emp-avatar-delete-btn');
+  const uploadBtn = document.getElementById('emp-avatar-upload-btn');
+  if(deleteBtn) deleteBtn.style.pointerEvents = 'none';
+  if(uploadBtn) uploadBtn.style.pointerEvents = 'none';
+
+  try {
+    // Best-effort delete of the stored file; if it's already gone (e.g. path
+    // mismatch from before the JPEG-only change), don't block clearing the field.
+    try {
+      const fileRef = fb.storageRef(fb.storage, `employee-photos/${uid}/photo.jpg`);
+      await fb.deleteObject(fileRef);
+    } catch(storageErr){
+      console.warn('deleteEmpPhoto: storage object delete failed (continuing):', storageErr);
+    }
+
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), { photoURL: fb.deleteField() });
+
+    cached.photoURL = null;
+
+    const name = cached.fullName || cached.displayName || cached.email?.split('@')[0] || '—';
+    const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2) || '?';
+    const av = document.getElementById('emp-avatar');
+    if(av) av.innerHTML = initials;
+    if(deleteBtn) deleteBtn.style.display = 'none';
+
+    if(typeof renderHRGrid === 'function') renderHRGrid(HR_ALL_EMPLOYEES);
+    showToast('Photo removed.');
+  } catch(e){
+    console.warn('deleteEmpPhoto failed:', e);
+    showToast('Could not remove photo.');
+  } finally {
+    if(deleteBtn) deleteBtn.style.pointerEvents = '';
+    if(uploadBtn) uploadBtn.style.pointerEvents = '';
   }
 }
 
@@ -14149,7 +14305,24 @@ async function submitCreateAccount(){
 
       <!-- Employee header card -->
       <div style="display:flex;align-items:center;gap:16px;padding:16px 20px 14px;">
-        <div class="profile-avatar" id="emp-avatar" style="width:54px;height:54px;font-size:1.15rem;flex-shrink:0;">??</div>
+        <div style="position:relative;width:54px;height:54px;flex-shrink:0;">
+          <div class="profile-avatar" id="emp-avatar" style="width:54px;height:54px;font-size:1.15rem;overflow:hidden;">??</div>
+          <button id="emp-avatar-upload-btn" onclick="document.getElementById('emp-avatar-file-input').click()"
+            title="Upload photo (Super Admin)"
+            style="display:none;position:absolute;bottom:-4px;right:-4px;width:22px;height:22px;border-radius:50%;
+                   background:var(--red);color:#fff;border:2px solid var(--bg2);cursor:pointer;
+                   align-items:center;justify-content:center;font-size:0.65rem;line-height:1;padding:0;">
+            📷
+          </button>
+          <button id="emp-avatar-delete-btn" onclick="deleteEmpPhoto()"
+            title="Remove photo (Super Admin)"
+            style="display:none;position:absolute;top:-4px;right:-4px;width:20px;height:20px;border-radius:50%;
+                   background:var(--bg2);color:var(--red);border:2px solid var(--red-border);cursor:pointer;
+                   align-items:center;justify-content:center;font-size:0.65rem;line-height:1;padding:0;">
+            ✕
+          </button>
+          <input type="file" id="emp-avatar-file-input" accept="image/*" style="display:none;" onchange="handleEmpPhotoSelected(event)" />
+        </div>
         <div style="flex:1;min-width:0;">
           <div class="profile-name" id="emp-modal-name" style="font-size:1.1rem;">—</div>
           <div class="profile-meta" id="emp-modal-meta" style="font-size:0.78rem;">—</div>
@@ -14593,11 +14766,14 @@ async function loadMyProfile() {
     // Header
     const name = d.fullName || d.displayName || user.email.split('@')[0];
     const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-    const av = document.getElementById('prof-avatar'); if (av) av.textContent = initials;
+    const avatarHTML = d.photoURL
+      ? `<img src="${d.photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
+    const av = document.getElementById('prof-avatar'); if (av) av.innerHTML = avatarHTML;
     const pn = document.getElementById('prof-name');   if (pn) pn.textContent = name;
     // Also update topbar username and dashboard avatar to reflect real full name
     const tbUser = document.getElementById('tb-user'); if (tbUser) tbUser.textContent = name;
-    const dashAv = document.getElementById('dash-avatar'); if (dashAv) dashAv.textContent = initials;
+    const dashAv = document.getElementById('dash-avatar'); if (dashAv) dashAv.innerHTML = avatarHTML;
     const pm = document.getElementById('prof-meta');
     if (pm) pm.textContent = (d.branch || '—') + ' Branch · ' + (d.jobTitle || '—');
     const ph = document.getElementById('prof-hired-tag'); if (ph) ph.textContent = 'Hired: ' + (d.dateHired || '—');
