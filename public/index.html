@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -41,8 +41,16 @@
     limit,
     startAfter,
     runTransaction,
-    increment
+    increment,
+    deleteField
   } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import {
+    getStorage,
+    ref as storageRef,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject
+  } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
  const firebaseConfig = {
   apiKey: "AIzaSyCIRKidWZ5D-5PQ5Sb1qJ1HXFEyDlf-vY8",
@@ -54,16 +62,18 @@
 };
   // ─────────────────────────────────────────────────────────────
 
-  const app  = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db   = getFirestore(app);
+  const app     = initializeApp(firebaseConfig);
+  const auth    = getAuth(app);
+  const db      = getFirestore(app);
+  const storage = getStorage(app);
 
   // ── Expose helpers to global scope so inline onclick="" can call them ──
-  window._fb = { auth, db, app, _config: firebaseConfig, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
+  window._fb = { auth, db, app, storage, _config: firebaseConfig, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
                  sendSignInLinkToEmail, isSignInWithEmailLink,
                  signInWithEmailLink, onAuthStateChanged,
                  doc, setDoc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, collection, collectionGroup, serverTimestamp,
-                 query, where, orderBy, limit, startAfter, runTransaction, increment };
+                 query, where, orderBy, limit, startAfter, runTransaction, increment, deleteField,
+                 storageRef, uploadBytes, getDownloadURL, deleteObject };
 
   // ── Persistent auto-login until manual logout ──
   // browserLocalPersistence keeps the user signed in across page refreshes, tab closes,
@@ -137,6 +147,19 @@
     // user=null is completely IGNORED here
     // logout() handles screen switching directly — we don't need onAuthStateChanged for that
   });
+
+  // Show the company logo on the login screen too, before anyone signs in.
+  // (Requires the `company/logo.png` Storage path and `settings/branding`
+  // Firestore doc to allow public read — see rules note.)
+  if (typeof window.loadCompanyLogo === 'function') {
+    window.loadCompanyLogo();
+  } else {
+    // Classic <script> defining loadCompanyLogo may not have run yet in some
+    // load orders — retry shortly after the page settles.
+    window.addEventListener('load', () => {
+      if (typeof window.loadCompanyLogo === 'function') window.loadCompanyLogo();
+    });
+  }
 
 
   // ═════════════════════════════════════════════════════════════
@@ -846,7 +869,7 @@ body.app-running #screen-app   { display:flex !important; }
 }
 .login-hex{
   width:42px;height:42px;background:linear-gradient(135deg,var(--red),#6d8bff);
-  border-radius:5px;
+  border-radius:5px;overflow:hidden;
   display:flex;align-items:center;justify-content:center;
   font-family:var(--sans);font-size:0.95rem;font-weight:800;color:#fff;
   box-shadow:0 4px 12px rgba(59,91,253,0.28);
@@ -926,6 +949,13 @@ body.app-running #screen-app   { display:flex !important; }
   font-family:var(--sans);font-size:0.75rem;font-weight:800;color:#fff;
 }
 .topbar-name{font-family:var(--sans);font-weight:800;font-size:1.02rem;letter-spacing:-0.01em;color:var(--text);}
+.topbar-logo-wrap{position:relative;width:32px;height:32px;flex-shrink:0;}
+.topbar-logo-overlay{
+  position:absolute;inset:0;border-radius:5px;background:rgba(0,0,0,0.55);
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  opacity:0;transition:opacity 0.15s;font-size:0.7rem;
+}
+.topbar-logo-wrap:hover .topbar-logo-overlay{opacity:1;}
 
 .topbar-clock{
   font-family:var(--mono);font-size:0.78rem;letter-spacing:0.02em;font-weight:600;
@@ -1208,7 +1238,7 @@ body.app-running #screen-app   { display:flex !important; }
 }
 .profile-avatar{
   width:76px;height:76px;background:linear-gradient(135deg,var(--red),#6d8bff);border-radius:18px;
-  display:flex;align-items:center;justify-content:center;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
   font-family:var(--sans);font-size:1.6rem;color:#fff;font-weight:800;flex-shrink:0;
 }
 .profile-name{font-family:var(--sans);font-size:1.25rem;font-weight:800;letter-spacing:-0.01em;margin-bottom:4px;}
@@ -1529,11 +1559,76 @@ body.app-running #screen-app   { display:flex !important; }
 </head>
 <body>
 
+<script>
+// ══════════════════════════════════════════════════════════════════════
+//  GLOBAL DOUBLE-CLICK / DOUBLE-SUBMIT GUARD
+//  Prevents ANY onclick-triggered action (Submit, Approve, Reject, Delete,
+//  Save, Cancel, etc. — all 500+ buttons in this app) from firing more than
+//  once per click. Stops duplicate Firestore writes / duplicate records
+//  caused by double-clicking or clicking rapidly while a request is still
+//  in flight. Works globally via event delegation in the CAPTURE phase, so
+//  it intercepts BEFORE the element's own inline onclick handler runs — and
+//  it automatically covers buttons rendered later/dynamically since the
+//  listener lives on document, not on the individual elements.
+// ══════════════════════════════════════════════════════════════════════
+(function () {
+  var COOLDOWN_MS = 1200; // long enough to cover a typical Firestore round-trip
+
+  document.addEventListener('click', function (e) {
+    // Clicking into a form field (to focus/type/select) must NEVER be caught
+    // by this guard — it's not a submit action. Without this, clicking an
+    // input inside a modal would bubble up to the modal-overlay's onclick
+    // ("if(event.target===this)closeXModal()", used for click-outside-to-close)
+    // and the guard would dim + disable the ENTIRE modal — including the very
+    // input you just clicked — for the cooldown period.
+    var fieldTags = ['INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'LABEL'];
+    if (e.target && (fieldTags.indexOf(e.target.tagName) !== -1 || e.target.isContentEditable)) return;
+
+    var el = e.target.closest('[onclick]');
+    if (!el) return;
+
+    // Backdrop/container elements (modal overlays, click-outside-to-close
+    // wrappers) aren't an "action" in themselves — they just wrap real
+    // content. Guarding them would visually disable everything inside.
+    if (el.classList.contains('modal-overlay')) return;
+
+    // Already processing this exact element — swallow the repeat click entirely.
+    if (el.dataset._guardBusy === '1') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+      return;
+    }
+
+    // Mark busy and give a subtle visual "processing" cue.
+    el.dataset._guardBusy = '1';
+    var wasDisabled = ('disabled' in el) ? el.disabled === true : false;
+    if ('disabled' in el) el.disabled = true;
+    var prevPointerEvents = el.style.pointerEvents;
+    var prevOpacity       = el.style.opacity;
+    var prevCursor        = el.style.cursor;
+    el.style.pointerEvents = 'none';
+    el.style.opacity       = '0.6';
+    el.style.cursor        = 'not-allowed';
+
+    setTimeout(function () {
+      // Element may have been removed/replaced (e.g. modal closed, table
+      // re-rendered) — resetting stale style props on it is harmless either way.
+      el.dataset._guardBusy = '';
+      if ('disabled' in el && !wasDisabled) el.disabled = false;
+      el.style.pointerEvents = prevPointerEvents;
+      el.style.opacity       = prevOpacity;
+      el.style.cursor        = prevCursor;
+    }, COOLDOWN_MS);
+  }, true); // capture phase = runs before the inline onclick handler fires
+})();
+</script>
+
 <!-- ══════════════ LOGIN ══════════════ -->
 <div id="screen-login" class="screen active" style="flex-direction:column;">
   <div class="login-card">
     <div class="login-brand">
-      <div class="login-hex">E</div>
+      <div class="login-hex" id="login-logo">E</div>
       <div class="login-brandname">ERPB</div>
     </div>
     <div class="login-sub">Enterprise Resource Planning Builder</div>
@@ -1808,7 +1903,16 @@ body.app-running #screen-app   { display:flex !important; }
   <header class="topbar">
     <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleMobileSidebar()" aria-label="Toggle menu">☰</button>
     <div class="topbar-brand">
-      <div class="topbar-hex">E</div>
+      <div class="topbar-logo-wrap">
+        <div class="topbar-hex" id="topbar-logo">E</div>
+        <div class="topbar-logo-overlay" id="topbar-logo-overlay">
+          <span onclick="document.getElementById('topbar-logo-file-input').click()" title="Upload company logo (Super Admin)"
+            style="flex:1;height:100%;display:flex;align-items:center;justify-content:center;">📷</span>
+          <span id="topbar-logo-remove-btn" onclick="deleteCompanyLogo()" title="Remove company logo (Super Admin)"
+            style="flex:1;height:100%;display:none;align-items:center;justify-content:center;border-left:1px solid rgba(255,255,255,0.35);">✕</span>
+        </div>
+        <input type="file" id="topbar-logo-file-input" accept="image/*" style="display:none;" onchange="handleCompanyLogoSelected(event)" />
+      </div>
       <div class="topbar-name">ERPB</div>
     </div>
     <div class="topbar-clock" id="clock">--:--:-- --</div>
@@ -1877,6 +1981,10 @@ body.app-running #screen-app   { display:flex !important; }
         <div class="nav-section">Finance</div>
         <div class="nav-item" onclick="showPage('expenses',this)">
           Expenses
+        </div>
+        <div class="nav-item" id="nav-cashadvance" onclick="showPage('cashadvance',this)">
+          Cash Advance
+          <span class="badge" id="badge-ca" style="display:none">0</span>
         </div>
         <div class="nav-section">Requests</div>
         <div class="nav-item" onclick="showPage('leave',this)">
@@ -3992,6 +4100,66 @@ body.app-running #screen-app   { display:flex !important; }
     </div>
   </div>
 </div>
+
+<!-- ══ CASH ADVANCE PAGE ══ -->
+<div id="page-cashadvance" class="page">
+  <div class="page-heading">CASH <span>ADVANCE</span></div>
+
+  <!-- My Cash Advance Requests (all roles can file) -->
+  <div class="panel" style="margin-bottom:14px;">
+    <div class="panel-title" style="margin-bottom:14px;">My Cash Advance Requests
+      <button onclick="openCAModal()" style="margin-left:auto;background:var(--red);color:#fff;border:none;padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ New Request</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid var(--border2);">
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem;" class="leave-table">
+        <thead><tr>
+          <th>Ref #</th>
+          <th>Date Filed</th>
+          <th>Purpose</th>
+          <th>Date Needed</th>
+          <th style="text-align:right;">Amount (₱)</th>
+          <th style="text-align:center;">Status</th>
+          <th style="text-align:center;">Actions</th>
+        </tr></thead>
+        <tbody id="my-ca-tbody"></tbody>
+      </table>
+    </div>
+    <div id="my-ca-empty" style="display:none;text-align:center;padding:32px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border:1px solid var(--border2);border-top:none;background:var(--card);">◇<br><br>NO CASH ADVANCE REQUESTS YET</div>
+  </div>
+
+  <!-- Admin/Super Admin: All Cash Advance Requests — final approval stays Super Admin only -->
+  <div class="panel" id="ca-admin-panel" style="display:none;">
+    <div class="panel-title" style="margin-bottom:14px;">All Cash Advance Requests — Pending Super Admin Approval
+      <span id="ca-pending-count" style="margin-left:8px;background:var(--red);color:#fff;padding:2px 8px;font-family:var(--mono);font-size:0.62rem;display:none;"></span>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+      <input type="text" id="ca-search" placeholder="Search by name, purpose or ref#…" style="flex:1;min-width:180px;" oninput="renderCAAdminTable()"/>
+      <select id="ca-status-filter" onchange="renderCAAdminTable()" style="min-width:140px;">
+        <option value="">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="approved">Approved</option>
+        <option value="rejected">Rejected</option>
+        <option value="voided">Voided</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;border:1px solid var(--border2);">
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem;" class="leave-table">
+        <thead><tr>
+          <th>Ref #</th>
+          <th>Date Filed</th>
+          <th>Applicant</th>
+          <th>Purpose</th>
+          <th>Date Needed</th>
+          <th style="text-align:right;">Amount (₱)</th>
+          <th style="text-align:center;">Status</th>
+          <th style="text-align:center;">Actions</th>
+        </tr></thead>
+        <tbody id="admin-ca-tbody"></tbody>
+      </table>
+    </div>
+    <div id="admin-ca-empty" style="display:none;text-align:center;padding:32px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border:1px solid var(--border2);border-top:none;background:var(--card);">◇<br><br>NO CASH ADVANCE REQUESTS</div>
+  </div>
+</div>
       <div id="page-leave" class="page">
         <div class="page-heading">REQUEST FOR <span>LEAVE</span></div>
 
@@ -4061,6 +4229,7 @@ body.app-running #screen-app   { display:flex !important; }
         <div class="panel" id="leave-admin-panel" style="display:none;">
           <div class="panel-title" style="margin-bottom:14px;">All Leave Requests
             <span id="leave-pending-count" style="margin-left:8px;background:var(--red);color:#fff;padding:2px 8px;font-family:var(--mono);font-size:0.62rem;display:none;"></span>
+            <button onclick="openLeaveModal(true)" style="margin-left:auto;background:var(--red);color:#fff;border:none;padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ File Leave for Staff</button>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
             <input type="text" id="leave-search" placeholder="Search by name or ref#…" style="flex:1;min-width:180px;" oninput="renderLeaveAdminTable()"/>
@@ -4078,7 +4247,7 @@ body.app-running #screen-app   { display:flex !important; }
               <option value="Maternity Leave">Maternity Leave</option>
               <option value="Paternity Leave">Paternity Leave</option>
               <option value="Bereavement Leave">Bereavement Leave</option>
-              <option value="Other">Other</option>
+              <option value="Custom">Custom</option>
             </select>
           </div>
           <div style="overflow-x:auto;border:1px solid var(--border2);">
@@ -4768,7 +4937,7 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
         <div class="field">
           <label>Category *</label>
-          <select id="reimb-category">
+          <select id="reimb-category" onchange="toggleReimbCustomCategory()">
             <option value="">— Select Category —</option>
             <option>Transportation</option>
             <option>Meals & Entertainment</option>
@@ -4779,8 +4948,11 @@ body.app-running #screen-app   { display:flex !important; }
             <option>Client Visit</option>
             <option>Training & Seminar</option>
             <option>Purchases</option>
-            <option>Other</option>
+            <option value="Custom">Custom</option>
           </select>
+          <input type="text" id="reimb-category-custom"
+            placeholder="Enter custom category"
+            style="display:none;margin-top:6px;"/>
         </div>
         <div class="field">
           <label>Type *</label>
@@ -4921,16 +5093,23 @@ body.app-running #screen-app   { display:flex !important; }
 <div id="modal-leave" class="modal-overlay" onclick="if(event.target===this)closeLeaveModal()">
   <div class="modal-card" style="max-width:600px;">
     <div class="modal-title">
-      □ &nbsp;File Leave Application
+      □ &nbsp;<span id="leave-modal-title-text">File Leave Application</span>
       <button class="modal-close" onclick="closeLeaveModal()">✕</button>
     </div>
 
     <!-- FORM VIEW -->
     <div id="leave-form-wrap">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+        <div class="field" id="leave-for-employee-wrap" style="display:none;grid-column:1/-1;">
+          <label>Staff Member *</label>
+          <select id="leave-for-employee">
+            <option value="">— Select Employee —</option>
+          </select>
+          <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.04em;color:var(--text-muted);margin-top:5px;">Filing this application on behalf of the selected staff member.</div>
+        </div>
         <div class="field">
           <label>Leave Type *</label>
-          <select id="leave-type">
+          <select id="leave-type" onchange="toggleLeaveCustomType()">
             <option value="">— Select Type —</option>
             <option>Vacation Leave</option>
             <option>Sick Leave</option>
@@ -4938,8 +5117,11 @@ body.app-running #screen-app   { display:flex !important; }
             <option>Maternity Leave</option>
             <option>Paternity Leave</option>
             <option>Bereavement Leave</option>
-            <option>Other</option>
+            <option value="Custom">Custom</option>
           </select>
+          <input type="text" id="leave-type-custom"
+            placeholder="Enter custom leave type"
+            style="display:none;margin-top:6px;"/>
         </div>
         <div class="field">
           <label>Ref # (auto)</label>
@@ -5150,15 +5332,18 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
         <div class="field">
           <label>Mode of Transport *</label>
-          <select id="ob-transport">
+          <select id="ob-transport" onchange="toggleOBCustomTransport()">
             <option value="">— Select —</option>
             <option value="Company Vehicle">Company Vehicle</option>
             <option value="Personal Vehicle (w/ fuel reimbursement)">Personal Vehicle (w/ fuel reimbursement)</option>
             <option value="Airline">Airline</option>
             <option value="Bus / Coach">Bus / Coach</option>
             <option value="Grab / Taxi">Grab / Taxi</option>
-            <option value="Other">Other</option>
+            <option value="Custom">Custom</option>
           </select>
+          <input type="text" id="ob-transport-custom"
+            placeholder="Enter custom mode of transport"
+            style="display:none;margin-top:6px;"/>
         </div>
         <div class="field">
           <label>Estimated Budget (₱) *</label>
@@ -5219,6 +5404,100 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
     </div>
     <div id="ob-detail-actions" style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;"></div>
+  </div>
+</div>
+
+<!-- ══════════════ FILE CASH ADVANCE MODAL ══════════════ -->
+<div id="modal-ca" class="modal-overlay" onclick="if(event.target===this)closeCAModal()">
+  <div class="modal-card" style="max-width:600px;">
+    <div class="modal-title">
+      ✦ &nbsp;File Cash Advance Request
+      <button class="modal-close" onclick="closeCAModal()">✕</button>
+    </div>
+
+    <!-- FORM VIEW -->
+    <div id="ca-form-wrap">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 14px;">
+        <div class="field">
+          <label>Ref # (auto)</label>
+          <input type="text" id="ca-ref-no" readonly
+            style="background:var(--bg3);opacity:0.85;cursor:default;font-family:var(--mono);letter-spacing:0.06em;color:var(--red);"
+            placeholder="Auto-generating…"/>
+        </div>
+        <div class="field">
+          <label>Date of Filing</label>
+          <input type="text" id="ca-date-filed" readonly
+            style="background:var(--bg3);opacity:0.85;cursor:default;font-family:var(--mono);font-size:0.8rem;"/>
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>Purpose / Reason *</label>
+          <textarea id="ca-purpose" rows="3" placeholder="Describe what the cash advance will be used for…"
+            style="width:100%;background:var(--bg);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.85rem;resize:vertical;outline:none;font-family:inherit;"></textarea>
+        </div>
+        <div class="field">
+          <label>Amount Requested (₱) *</label>
+          <input type="number" id="ca-amount" min="0" step="0.01" placeholder="0.00"/>
+        </div>
+        <div class="field">
+          <label>Date Needed *</label>
+          <input type="date" id="ca-date-needed"/>
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>Notes</label>
+          <input type="text" id="ca-notes" placeholder="Optional remarks"/>
+        </div>
+      </div>
+
+      <div style="background:rgba(21,101,192,0.06);border:1px solid rgba(21,101,192,0.25);padding:10px 14px;margin-bottom:14px;font-size:0.78rem;color:var(--red);font-family:var(--mono);letter-spacing:0.04em;">
+        ⚠ This Cash Advance request requires Super Admin approval before funds are released. Liquidation/receipts may be required upon settlement.
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <button class="btn btn-red" id="ca-submit-btn" onclick="submitCA()" style="flex:1;">Submit for Approval</button>
+        <button class="btn btn-ghost" onclick="closeCAModal()" style="width:140px;margin:0;">Cancel</button>
+      </div>
+      <div id="ca-form-msg" style="margin-top:8px;"></div>
+    </div>
+
+    <!-- CONFIRMATION VIEW -->
+    <div id="ca-confirm-wrap" style="display:none;">
+      <div style="text-align:center;margin-bottom:14px;">
+        <span style="font-family:var(--mono);font-size:0.72rem;letter-spacing:0.12em;color:var(--green);text-transform:uppercase;background:var(--green-dim);border:1px solid rgba(2,119,189,0.3);padding:6px 18px;">
+          ✓ Cash Advance Request Submitted — Pending Super Admin Approval
+        </span>
+      </div>
+      <div id="ca-confirm-body" style="background:var(--bg3);border:1px solid var(--border2);padding:20px 24px;margin-bottom:4px;"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;justify-content:center;">
+        <button class="btn btn-red" onclick="openCAModal()" style="width:220px;">New Cash Advance Request</button>
+        <button class="btn btn-ghost" onclick="closeCAModal()" style="width:160px;margin:0;">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ CASH ADVANCE DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
+<div id="modal-ca-detail" class="modal-overlay" onclick="if(event.target===this)closeCADetail()">
+  <div class="modal-card" style="max-width:600px;">
+    <div class="modal-title">
+      ✦ &nbsp;Cash Advance — Request Details
+      <button class="modal-close" onclick="closeCADetail()">✕</button>
+    </div>
+    <div id="ca-detail-body"></div>
+    <div id="ca-detail-reject-row" style="display:none;margin-top:12px;">
+      <div class="field" style="margin-bottom:8px;">
+        <label>Rejection Reason *</label>
+        <textarea id="ca-reject-reason" rows="2" placeholder="State the reason for rejecting this cash advance request…"
+          style="width:100%;background:var(--bg);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.85rem;resize:vertical;outline:none;font-family:inherit;"></textarea>
+      </div>
+    </div>
+    <div id="ca-detail-void-row" style="display:none;margin-top:12px;">
+      <div class="field" style="margin-bottom:8px;">
+        <label>Void Reason *</label>
+        <textarea id="ca-void-reason" rows="2" placeholder="State the reason for voiding this already-approved cash advance…"
+          style="width:100%;background:var(--bg);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.85rem;resize:vertical;outline:none;font-family:inherit;"></textarea>
+      </div>
+    </div>
+    <div id="ca-detail-actions" style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;"></div>
   </div>
 </div>
 
@@ -5642,6 +5921,7 @@ function initApp(){
   buildBarChart();
   buildActivity();
   loadMyProfile();
+  loadCompanyLogo();
   const salesReadyPromise = loadSalesFromFirestore();
 
   // Auto-heal serials that were sold on a completed sale but never got
@@ -11132,7 +11412,8 @@ const PAGE_TITLES = {
   installation:'INSTALLATION LIST', expenses:'EXPENSES',
   leave:'REQUEST FOR LEAVE', overtime:'REQUEST FOR OVERTIME',
   holiday:'WORK ON HOLIDAY', ob:'OFFICIAL BUSINESS',
-  purchaseorders:'PURCHASE ORDERS', reimbursements:'REIMBURSEMENTS'
+  purchaseorders:'PURCHASE ORDERS', reimbursements:'REIMBURSEMENTS',
+  cashadvance:'CASH ADVANCE'
 };
 function showPage(name, el){
   if(el && el.classList.contains('locked')){
@@ -11162,6 +11443,7 @@ function showPage(name, el){
   if(name === 'overtime'){ if(typeof loadOTPage === 'function') loadOTPage(); }
   if(name === 'holiday'){ if(typeof loadWOHPage === 'function') loadWOHPage(); }
   if(name === 'ob'){ if(typeof loadOBPage === 'function') loadOBPage(); }
+  if(name === 'cashadvance'){ if(typeof loadCashAdvancePage === 'function') loadCashAdvancePage(); }
 }
 // ── PROFILE TABS ──
 function switchTab(name, el){
@@ -11662,9 +11944,11 @@ function openReimbModal(){
   document.getElementById('reimb-form-msg').innerHTML = '';
   const btn = document.getElementById('reimb-submit-btn');
   if(btn){ btn.disabled=false; btn.textContent='Submit Request'; }
-  ['reimb-category','reimb-type','reimb-purpose','reimb-notes'].forEach(id=>{
+  ['reimb-category','reimb-type','reimb-purpose','reimb-notes','reimb-category-custom'].forEach(id=>{
     const el = document.getElementById(id); if(el) el.value='';
   });
+  const customCatEl = document.getElementById('reimb-category-custom');
+  if(customCatEl) customCatEl.style.display = 'none';
   // Replenish is an Admin/Super Admin-only request type — hide the option
   // entirely for regular users so they can only file a Request.
   const canReplenish = (currentRole === 'admin' || currentRole === 'super');
@@ -12121,10 +12405,26 @@ function toggleReimbTin(){
   }
 }
 
+// ── Toggle custom category input based on Category select ──
+function toggleReimbCustomCategory(){
+  const sel = document.getElementById('reimb-category');
+  const customEl = document.getElementById('reimb-category-custom');
+  if(!sel || !customEl) return;
+  if(sel.value === 'Custom'){
+    customEl.style.display = 'block';
+  } else {
+    customEl.style.display = 'none';
+    customEl.value = '';
+  }
+}
+
 // ── Submit Reimbursement ──
 async function submitReimb(){
   const receiptName = document.getElementById('reimb-receipt-name').value.trim();
-  const category  = document.getElementById('reimb-category').value;
+  let category  = document.getElementById('reimb-category').value;
+  if(category === 'Custom'){
+    category = document.getElementById('reimb-category-custom').value.trim();
+  }
   const type      = document.getElementById('reimb-type').value;
   const expDate   = document.getElementById('reimb-date').value;
   const purpose   = document.getElementById('reimb-purpose').value.trim();
@@ -12139,7 +12439,11 @@ async function submitReimb(){
 
   if(!refNo)              { setMsg('Please enter the receipt/reference number from your receipt.'); return; }
   if(!receiptName)        { setMsg('Please enter the receipt name.'); return; }
-  if(!category)           { setMsg('Please select a category.'); return; }
+  if(!category) {
+    const rawCat = document.getElementById('reimb-category').value;
+    setMsg(rawCat === 'Custom' ? 'Please enter your custom category.' : 'Please select a category.');
+    return;
+  }
   if(!type)               { setMsg('Please select a type (Request or Replenish).'); return; }
   if(type === 'Replenish' && currentRole !== 'admin' && currentRole !== 'super'){
     setMsg('Replenish requests are restricted to Admin and Super Admin.'); return;
@@ -12587,6 +12891,10 @@ function renderHRGrid(list){
     const branch   = emp.branch   || '—';
     const jobTitle = emp.jobTitle || '—';
     const email    = emp.email    || '—';
+    const photoURL = emp.photoURL || '';
+    const avatarInner = photoURL
+      ? `<img src="${photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
     return `
       <div ${isSuperHR ? `onclick="openEmpProfile('${emp.id}')"` : ''} style="
         background:var(--card);border:1px solid var(--border2);padding:18px 16px;
@@ -12597,9 +12905,9 @@ function renderHRGrid(list){
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="
             width:42px;height:42px;background:var(--red-dim);border:1px solid var(--red-border);
-            display:flex;align-items:center;justify-content:center;
+            display:flex;align-items:center;justify-content:center;overflow:hidden;
             font-family:var(--mono);font-size:0.9rem;font-weight:700;color:var(--red);flex-shrink:0;
-          ">${initials}</div>
+          ">${avatarInner}</div>
           <div style="min-width:0;">
             <div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
             <div style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${email}</div>
@@ -13566,7 +13874,14 @@ async function openEmpProfile(uid){
     const role     = d.role || 'user';
 
     // ── Header ──
-    const av = document.getElementById('emp-avatar'); if(av) av.textContent = initials;
+    const av = document.getElementById('emp-avatar');
+    if(av) av.innerHTML = d.photoURL
+      ? `<img src="${d.photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
+    const uploadBtn = document.getElementById('emp-avatar-upload-btn');
+    if(uploadBtn) uploadBtn.style.display = (window._currentRole === 'super') ? 'flex' : 'none';
+    const deleteBtn0 = document.getElementById('emp-avatar-delete-btn');
+    if(deleteBtn0) deleteBtn0.style.display = (window._currentRole === 'super' && d.photoURL) ? 'flex' : 'none';
     set('emp-modal-name', name);
     const meta = document.getElementById('emp-modal-meta');
     if(meta) meta.innerHTML = `${d.branch||'—'} Branch &nbsp;&middot;&nbsp; ${d.jobTitle||'—'}`;
@@ -13627,6 +13942,276 @@ async function openEmpProfile(uid){
     showToast('Could not load employee profile.');
     console.warn('openEmpProfile failed:', e);
     closeEmpProfile();
+  }
+}
+
+// Resize + re-encode an image file client-side before it ever reaches Storage,
+// so a multi-MB phone photo doesn't get stored (and served) at full size.
+// Downscales to fit within maxDim x maxDim and re-encodes as JPEG.
+function resizeImageFile(file, maxDim = 400, quality = 0.82){
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        if(width >= height){ height = Math.round(height * (maxDim / width)); width = maxDim; }
+        else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => {
+        if(!blob){ reject(new Error('Could not process image.')); return; }
+        resolve(blob);
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Could not read image file.')); };
+    img.src = objectUrl;
+  });
+}
+
+async function handleEmpPhotoSelected(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = ''; // reset so selecting the same file again still fires onchange
+  if(!file) return;
+
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const uid = window._viewingEmpUid;
+  if(!uid){ showToast('No employee selected.'); return; }
+
+  if(!file.type.startsWith('image/')){ showToast('Please select an image file.'); return; }
+  if(file.size > 10 * 1024 * 1024){ showToast('Image must be smaller than 10MB.'); return; }
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const av = document.getElementById('emp-avatar');
+  const btn = document.getElementById('emp-avatar-upload-btn');
+  const prevAvatarHTML = av ? av.innerHTML : '';
+  if(av) av.innerHTML = `<span style="font-size:0.6rem;font-family:var(--mono);">…</span>`;
+  if(btn) btn.style.pointerEvents = 'none';
+
+  try {
+    // Downscale + compress to a small JPEG (~400px, ~80% quality) before upload
+    // so avatars only ever cost a few KB of Storage instead of the original MBs.
+    let uploadBlob;
+    try {
+      uploadBlob = await resizeImageFile(file, 400, 0.82);
+    } catch(resizeErr){
+      console.warn('Image resize failed, uploading original file instead:', resizeErr);
+      uploadBlob = file;
+    }
+
+    const path = `employee-photos/${uid}/photo.jpg`;
+    const fileRef = fb.storageRef(fb.storage, path);
+    await fb.uploadBytes(fileRef, uploadBlob, { contentType: 'image/jpeg' });
+    const url = await fb.getDownloadURL(fileRef);
+
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), { photoURL: url });
+
+    // Update local cache so the HR grid + this modal reflect the change immediately
+    const cached = HR_ALL_EMPLOYEES.find(e => e.id === uid);
+    if(cached) cached.photoURL = url;
+
+    if(av) av.innerHTML = `<img src="${url}" alt="Employee photo" style="width:100%;height:100%;object-fit:cover;" />`;
+    const deleteBtnAfterUpload = document.getElementById('emp-avatar-delete-btn');
+    if(deleteBtnAfterUpload) deleteBtnAfterUpload.style.display = 'flex';
+    if(typeof renderHRGrid === 'function') renderHRGrid(HR_ALL_EMPLOYEES);
+    showToast('Photo updated.');
+  } catch(e){
+    console.warn('handleEmpPhotoSelected failed:', e);
+    if(av) av.innerHTML = prevAvatarHTML;
+    showToast('Could not upload photo.');
+  } finally {
+    if(btn) btn.style.pointerEvents = '';
+  }
+}
+
+async function deleteEmpPhoto(){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const uid = window._viewingEmpUid;
+  if(!uid){ showToast('No employee selected.'); return; }
+
+  const cached = HR_ALL_EMPLOYEES.find(e => e.id === uid);
+  if(!cached || !cached.photoURL){ showToast('No photo to remove.'); return; }
+
+  if(!confirm('Remove this employee\'s photo? This cannot be undone.')) return;
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const deleteBtn = document.getElementById('emp-avatar-delete-btn');
+  const uploadBtn = document.getElementById('emp-avatar-upload-btn');
+  if(deleteBtn) deleteBtn.style.pointerEvents = 'none';
+  if(uploadBtn) uploadBtn.style.pointerEvents = 'none';
+
+  try {
+    // Best-effort delete of the stored file; if it's already gone (e.g. path
+    // mismatch from before the JPEG-only change), don't block clearing the field.
+    try {
+      const fileRef = fb.storageRef(fb.storage, `employee-photos/${uid}/photo.jpg`);
+      await fb.deleteObject(fileRef);
+    } catch(storageErr){
+      console.warn('deleteEmpPhoto: storage object delete failed (continuing):', storageErr);
+    }
+
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), { photoURL: fb.deleteField() });
+
+    cached.photoURL = null;
+
+    const name = cached.fullName || cached.displayName || cached.email?.split('@')[0] || '—';
+    const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2) || '?';
+    const av = document.getElementById('emp-avatar');
+    if(av) av.innerHTML = initials;
+    if(deleteBtn) deleteBtn.style.display = 'none';
+
+    if(typeof renderHRGrid === 'function') renderHRGrid(HR_ALL_EMPLOYEES);
+    showToast('Photo removed.');
+  } catch(e){
+    console.warn('deleteEmpPhoto failed:', e);
+    showToast('Could not remove photo.');
+  } finally {
+    if(deleteBtn) deleteBtn.style.pointerEvents = '';
+    if(uploadBtn) uploadBtn.style.pointerEvents = '';
+  }
+}
+
+// ── Company logo (topbar "E" icon) — Super Admin only, stored in Firebase ──
+
+// Resize an image to a small PNG (keeps transparency, unlike JPEG) — logos
+// only ever need to render at ~32px, so this keeps Storage usage tiny.
+function resizeImageToPng(file, maxDim = 240){
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        if(width >= height){ height = Math.round(height * (maxDim / width)); width = maxDim; }
+        else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => {
+        if(!blob){ reject(new Error('Could not process image.')); return; }
+        resolve(blob);
+      }, 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Could not read image file.')); };
+    img.src = objectUrl;
+  });
+}
+
+// Show the current company logo (or fall back to the "E" mark) — called after
+// login for every role, since anyone signed in should see the real logo.
+async function loadCompanyLogo(){
+  const fb = window._fb;
+  if(!fb) return;
+  try {
+    const snap = await fb.getDoc(fb.doc(fb.db, 'settings', 'branding'));
+    const logoURL = snap.exists() ? snap.data().logoURL : null;
+    window._companyLogoURL = logoURL || null;
+    const logoHTML = logoURL
+      ? `<img src="${logoURL}" alt="Company logo" style="width:100%;height:100%;object-fit:cover;" />`
+      : 'E';
+    const logoEl = document.getElementById('topbar-logo');
+    if(logoEl) logoEl.innerHTML = logoHTML;
+    const loginLogoEl = document.getElementById('login-logo');
+    if(loginLogoEl) loginLogoEl.innerHTML = logoHTML;
+  } catch(e){
+    console.warn('loadCompanyLogo failed:', e);
+  }
+
+  // Upload affordance is Super Admin only
+  const overlay = document.getElementById('topbar-logo-overlay');
+  if(overlay) overlay.style.display = (window._currentRole === 'super') ? 'flex' : 'none';
+  const removeBtn = document.getElementById('topbar-logo-remove-btn');
+  if(removeBtn) removeBtn.style.display = (window._currentRole === 'super' && window._companyLogoURL) ? 'flex' : 'none';
+}
+
+async function handleCompanyLogoSelected(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if(!file) return;
+
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(!file.type.startsWith('image/')){ showToast('Please select an image file.'); return; }
+  if(file.size > 10 * 1024 * 1024){ showToast('Image must be smaller than 10MB.'); return; }
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const logoEl = document.getElementById('topbar-logo');
+  const prevHTML = logoEl ? logoEl.innerHTML : '';
+  if(logoEl) logoEl.innerHTML = `<span style="font-size:0.5rem;">…</span>`;
+
+  try {
+    const blob = await resizeImageToPng(file, 240);
+    const fileRef = fb.storageRef(fb.storage, 'company/logo.png');
+    await fb.uploadBytes(fileRef, blob, { contentType: 'image/png' });
+    const url = await fb.getDownloadURL(fileRef);
+
+    await fb.setDoc(fb.doc(fb.db, 'settings', 'branding'), { logoURL: url }, { merge: true });
+    window._companyLogoURL = url;
+
+    const newLogoHTML = `<img src="${url}" alt="Company logo" style="width:100%;height:100%;object-fit:cover;" />`;
+    if(logoEl) logoEl.innerHTML = newLogoHTML;
+    const loginLogoEl = document.getElementById('login-logo');
+    if(loginLogoEl) loginLogoEl.innerHTML = newLogoHTML;
+    const removeBtn = document.getElementById('topbar-logo-remove-btn');
+    if(removeBtn) removeBtn.style.display = 'flex';
+    showToast('Company logo updated.');
+  } catch(e){
+    console.warn('handleCompanyLogoSelected failed:', e);
+    if(logoEl) logoEl.innerHTML = prevHTML;
+    showToast('Could not upload logo.');
+  }
+}
+
+async function deleteCompanyLogo(){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(!window._companyLogoURL){ showToast('No logo to remove.'); return; }
+
+  if(!confirm('Remove the company logo? This cannot be undone.')) return;
+
+  const fb = window._fb;
+  if(!fb) return;
+
+  const removeBtn = document.getElementById('topbar-logo-remove-btn');
+  if(removeBtn) removeBtn.style.pointerEvents = 'none';
+
+  try {
+    try {
+      const fileRef = fb.storageRef(fb.storage, 'company/logo.png');
+      await fb.deleteObject(fileRef);
+    } catch(storageErr){
+      console.warn('deleteCompanyLogo: storage object delete failed (continuing):', storageErr);
+    }
+
+    await fb.updateDoc(fb.doc(fb.db, 'settings', 'branding'), { logoURL: fb.deleteField() });
+    window._companyLogoURL = null;
+
+    const logoEl = document.getElementById('topbar-logo');
+    if(logoEl) logoEl.innerHTML = 'E';
+    const loginLogoEl = document.getElementById('login-logo');
+    if(loginLogoEl) loginLogoEl.innerHTML = 'E';
+    if(removeBtn) removeBtn.style.display = 'none';
+
+    showToast('Company logo removed.');
+  } catch(e){
+    console.warn('deleteCompanyLogo failed:', e);
+    showToast('Could not remove logo.');
+  } finally {
+    if(removeBtn) removeBtn.style.pointerEvents = '';
   }
 }
 
@@ -14149,7 +14734,24 @@ async function submitCreateAccount(){
 
       <!-- Employee header card -->
       <div style="display:flex;align-items:center;gap:16px;padding:16px 20px 14px;">
-        <div class="profile-avatar" id="emp-avatar" style="width:54px;height:54px;font-size:1.15rem;flex-shrink:0;">??</div>
+        <div style="position:relative;width:54px;height:54px;flex-shrink:0;">
+          <div class="profile-avatar" id="emp-avatar" style="width:54px;height:54px;font-size:1.15rem;overflow:hidden;">??</div>
+          <button id="emp-avatar-upload-btn" onclick="document.getElementById('emp-avatar-file-input').click()"
+            title="Upload photo (Super Admin)"
+            style="display:none;position:absolute;bottom:-4px;right:-4px;width:22px;height:22px;border-radius:50%;
+                   background:var(--red);color:#fff;border:2px solid var(--bg2);cursor:pointer;
+                   align-items:center;justify-content:center;font-size:0.65rem;line-height:1;padding:0;">
+            📷
+          </button>
+          <button id="emp-avatar-delete-btn" onclick="deleteEmpPhoto()"
+            title="Remove photo (Super Admin)"
+            style="display:none;position:absolute;top:-4px;right:-4px;width:20px;height:20px;border-radius:50%;
+                   background:var(--bg2);color:var(--red);border:2px solid var(--red-border);cursor:pointer;
+                   align-items:center;justify-content:center;font-size:0.65rem;line-height:1;padding:0;">
+            ✕
+          </button>
+          <input type="file" id="emp-avatar-file-input" accept="image/*" style="display:none;" onchange="handleEmpPhotoSelected(event)" />
+        </div>
         <div style="flex:1;min-width:0;">
           <div class="profile-name" id="emp-modal-name" style="font-size:1.1rem;">—</div>
           <div class="profile-meta" id="emp-modal-meta" style="font-size:0.78rem;">—</div>
@@ -14593,11 +15195,14 @@ async function loadMyProfile() {
     // Header
     const name = d.fullName || d.displayName || user.email.split('@')[0];
     const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-    const av = document.getElementById('prof-avatar'); if (av) av.textContent = initials;
+    const avatarHTML = d.photoURL
+      ? `<img src="${d.photoURL}" alt="${name}" style="width:100%;height:100%;object-fit:cover;" />`
+      : initials;
+    const av = document.getElementById('prof-avatar'); if (av) av.innerHTML = avatarHTML;
     const pn = document.getElementById('prof-name');   if (pn) pn.textContent = name;
     // Also update topbar username and dashboard avatar to reflect real full name
     const tbUser = document.getElementById('tb-user'); if (tbUser) tbUser.textContent = name;
-    const dashAv = document.getElementById('dash-avatar'); if (dashAv) dashAv.textContent = initials;
+    const dashAv = document.getElementById('dash-avatar'); if (dashAv) dashAv.innerHTML = avatarHTML;
     const pm = document.getElementById('prof-meta');
     if (pm) pm.textContent = (d.branch || '—') + ' Branch · ' + (d.jobTitle || '—');
     const ph = document.getElementById('prof-hired-tag'); if (ph) ph.textContent = 'Hired: ' + (d.dateHired || '—');
@@ -22694,6 +23299,7 @@ window.excelImportSelected = function() {
 .leave-status.pending  {color:#f59e0b;border:1px solid rgba(245,158,11,0.35);background:rgba(245,158,11,0.08);}
 .leave-status.approved {color:#10b981;border:1px solid rgba(16,185,129,0.35);background:rgba(16,185,129,0.08);}
 .leave-status.rejected {color:#ef5350;border:1px solid rgba(239,83,80,0.35);background:rgba(239,83,80,0.08);}
+.leave-status.voided   {color:#9ca3af;border:1px solid rgba(156,163,175,0.35);background:rgba(156,163,175,0.08);}
 .leave-detail-row{
   display:flex;justify-content:space-between;align-items:flex-start;
   padding:9px 0;border-bottom:1px solid var(--border);font-size:0.82rem;gap:12px;
@@ -22713,6 +23319,7 @@ window.excelImportSelected = function() {
 
 let ALL_LEAVES = [];   // Super Admin cache (all employees)
 let MY_LEAVES  = [];   // Current user's leaves
+let LEAVE_FOR_STAFF_MODE = false; // true when Admin/Super Admin is filing on behalf of a staff member
 
 // ── Leave balance configuration ─────────────────────────────────
 // Only 3 independent credit pools exist:
@@ -22956,9 +23563,10 @@ function renderLeaveAdminTable() {
   const ttf    = document.getElementById('leave-type-filter')?.value   || '';
   if (!tbody) return;
 
+  const STANDARD_LEAVE_TYPES = ['Vacation Leave','Sick Leave','Emergency Leave','Maternity Leave','Paternity Leave','Bereavement Leave'];
   const filtered = ALL_LEAVES.filter(l => {
     const matchS = !stf || l.status === stf;
-    const matchT = !ttf || l.leaveType === ttf;
+    const matchT = !ttf || (ttf === 'Custom' ? !STANDARD_LEAVE_TYPES.includes(l.leaveType) : l.leaveType === ttf);
     const matchQ = !search || (l.applicantName||'').toLowerCase().includes(search) || (l.refNo||'').toLowerCase().includes(search);
     return matchS && matchT && matchQ;
   });
@@ -22982,7 +23590,7 @@ function renderLeaveAdminTable() {
     return `<tr>
       <td style="font-family:var(--mono);font-size:0.7rem;color:var(--red);">${l.refNo||'—'}</td>
       <td>${filed}</td>
-      <td style="font-weight:600;">${l.applicantName||'—'}</td>
+      <td style="font-weight:600;">${l.applicantName||'—'}${l.filedByAdmin ? `<div style="font-size:0.6rem;font-weight:400;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.04em;text-transform:uppercase;margin-top:2px;">filed by ${l.filedByName||'admin'}</div>` : ''}</td>
       <td>${l.leaveType||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${l.dateFrom||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${l.dateTo||'—'}</td>
@@ -23529,15 +24137,85 @@ function nextLeaveRefNo() {
   return ref;
 }
 
+// ── Toggle custom leave type input based on Leave Type select ──
+function toggleLeaveCustomType(){
+  const sel = document.getElementById('leave-type');
+  const customEl = document.getElementById('leave-type-custom');
+  if(!sel || !customEl) return;
+  if(sel.value === 'Custom'){
+    customEl.style.display = 'block';
+  } else {
+    customEl.style.display = 'none';
+    customEl.value = '';
+  }
+}
+
+// ── Fetch/cache the employee directory even when the HR page hasn't ──
+// been opened yet (HR_ALL_EMPLOYEES is normally populated by loadHREmployees,
+// which bails out early if the HR grid element isn't on screen).
+async function ensureEmployeesLoadedForLeave() {
+  if (HR_ALL_EMPLOYEES && HR_ALL_EMPLOYEES.length) return HR_ALL_EMPLOYEES;
+  const fb = window._fb;
+  if (!fb) return [];
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    HR_ALL_EMPLOYEES = [];
+    snap.forEach(d => HR_ALL_EMPLOYEES.push({ id: d.id, ...d.data() }));
+  } catch(e) { console.warn('ensureEmployeesLoadedForLeave failed:', e); }
+  return HR_ALL_EMPLOYEES;
+}
+
+// ── Populate the "Staff Member" dropdown in the leave modal ─────
+window.populateLeaveEmployeeSelect = async function() {
+  const sel = document.getElementById('leave-for-employee');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Loading…</option>';
+  const list = await ensureEmployeesLoadedForLeave();
+  const sorted = [...list].sort((a, b) =>
+    (a.fullName || a.displayName || a.email || '').localeCompare(b.fullName || b.displayName || b.email || '')
+  );
+  if (!sorted.length) {
+    sel.innerHTML = '<option value="">No employees found</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">— Select Employee —</option>' + sorted.map(e => {
+    const name      = e.fullName || e.displayName || e.email?.split('@')[0] || e.id;
+    const roleLabel = (typeof ROLE_LABELS !== 'undefined' && ROLE_LABELS[e.role]) || e.role || 'user';
+    const label      = `${name} — ${roleLabel}${e.email ? ' (' + e.email + ')' : ''}`;
+    return `<option value="${e.id}">${label}</option>`;
+  }).join('');
+};
+
 // ── Open / close file modal ─────────────────────────────────────
-window.openLeaveModal = function() {
+// Pass forStaff=true (Admin/Super Admin only) to file an application on
+// behalf of another employee instead of the currently logged-in user.
+window.openLeaveModal = function(forStaff) {
+  const role = window._currentRole;
+  LEAVE_FOR_STAFF_MODE = !!forStaff && (role === 'super' || role === 'admin');
+
   document.getElementById('leave-form-wrap').style.display    = '';
   document.getElementById('leave-confirm-wrap').style.display = 'none';
   document.getElementById('leave-form-msg').innerHTML         = '';
   // Reset fields
-  ['leave-type','leave-date-from','leave-date-to','leave-reason','leave-contact','leave-notes']
+  ['leave-type','leave-date-from','leave-date-to','leave-reason','leave-contact','leave-notes','leave-type-custom']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const leaveCustomTypeEl = document.getElementById('leave-type-custom');
+  if (leaveCustomTypeEl) leaveCustomTypeEl.style.display = 'none';
   document.getElementById('leave-days-display').textContent = '—';
+
+  const empWrap = document.getElementById('leave-for-employee-wrap');
+  const titleEl = document.getElementById('leave-modal-title-text');
+  if (LEAVE_FOR_STAFF_MODE) {
+    if (empWrap) empWrap.style.display = '';
+    if (titleEl) titleEl.textContent = 'File Leave for Staff';
+    populateLeaveEmployeeSelect();
+  } else {
+    if (empWrap) empWrap.style.display = 'none';
+    const empSel = document.getElementById('leave-for-employee');
+    if (empSel) empSel.value = '';
+    if (titleEl) titleEl.textContent = 'File Leave Application';
+  }
+
   // Generate ref
   document.getElementById('leave-ref-no').value = nextLeaveRefNo();
   const btn = document.getElementById('leave-submit-btn');
@@ -23566,7 +24244,10 @@ window.calcLeaveDays = function() {
 
 // ── Submit ──────────────────────────────────────────────────────
 window.submitLeave = async function() {
-  const leaveType = document.getElementById('leave-type').value;
+  let leaveType   = document.getElementById('leave-type').value;
+  if (leaveType === 'Custom') {
+    leaveType = document.getElementById('leave-type-custom').value.trim();
+  }
   const dateFrom  = document.getElementById('leave-date-from').value;
   const dateTo    = document.getElementById('leave-date-to').value;
   const reason    = document.getElementById('leave-reason').value.trim();
@@ -23578,7 +24259,11 @@ window.submitLeave = async function() {
   const msgEl  = document.getElementById('leave-form-msg');
   const setMsg = (html, type = 'error') => { msgEl.innerHTML = `<div class="msg msg-${type}">${html}</div>`; };
 
-  if (!leaveType) { setMsg('Please select a leave type.'); return; }
+  if (!leaveType) {
+    const rawType = document.getElementById('leave-type').value;
+    setMsg(rawType === 'Custom' ? 'Please enter your custom leave type.' : 'Please select a leave type.');
+    return;
+  }
   if (!dateFrom)  { setMsg('Please select a start date.'); return; }
   if (!dateTo)    { setMsg('Please select an end date.'); return; }
   if (new Date(dateTo + 'T00:00:00') < new Date(dateFrom + 'T00:00:00')) { setMsg('End date must be on or after start date.'); return; }
@@ -23592,16 +24277,34 @@ window.submitLeave = async function() {
   const user = window._currentFirebaseUser;
   if (!fb || !user) { setMsg('Not authenticated. Please log in again.'); return; }
 
+  // ── Admin/Super Admin filing on behalf of a staff member ─────
+  let targetUid   = user.uid;
+  let targetName  = user.displayName || user.email.split('@')[0];
+  let targetEmail = user.email;
+  let filedForStaff = false;
+
+  if (LEAVE_FOR_STAFF_MODE) {
+    const empSel = document.getElementById('leave-for-employee');
+    const empId  = empSel ? empSel.value : '';
+    if (!empId) { setMsg('Please select the staff member to file this leave for.'); return; }
+    const emp = (HR_ALL_EMPLOYEES || []).find(e => e.id === empId);
+    if (!emp) { setMsg('Selected employee could not be found. Please try again.'); return; }
+    targetUid    = emp.id;
+    targetName   = emp.fullName || emp.displayName || emp.email?.split('@')[0] || emp.id;
+    targetEmail  = emp.email || '';
+    filedForStaff = true;
+  }
+
   const btn = document.getElementById('leave-submit-btn');
   btn.disabled = true; btn.textContent = 'Submitting…';
-  setMsg('Saving your application…', 'info');
+  setMsg('Saving the application…', 'info');
 
   try {
     const data = {
       refNo,
-      uid:            user.uid,
-      applicantName:  user.displayName || user.email.split('@')[0],
-      applicantEmail: user.email,
+      uid:            targetUid,
+      applicantName:  targetName,
+      applicantEmail: targetEmail,
       leaveType,
       dateFrom,
       dateTo,
@@ -23612,6 +24315,9 @@ window.submitLeave = async function() {
       notes,
       status:       'pending',
       createdAt:    fb.serverTimestamp(),
+      filedByAdmin: filedForStaff,
+      filedByUid:   filedForStaff ? user.uid : null,
+      filedByName:  filedForStaff ? (user.displayName || user.email) : null,
       reviewedBy:   null,
       reviewedByName: null,
       reviewedAt:   null,
@@ -23621,7 +24327,7 @@ window.submitLeave = async function() {
     const docRef = await fb.addDoc(fb.collection(fb.db, 'leaveRequests'), data);
     const local  = { id: docRef.id, ...data, createdAt: { seconds: Date.now() / 1000 } };
     ALL_LEAVES.unshift(local);
-    MY_LEAVES.unshift(local);
+    if (targetUid === user.uid) MY_LEAVES.unshift(local);
 
     updateLeaveNavBadge();
 
@@ -23631,6 +24337,7 @@ window.submitLeave = async function() {
     document.getElementById('leave-confirm-body').innerHTML = `
       <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${refNo}</span></div>
       <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val">${data.applicantName}</span></div>
+      ${filedForStaff ? `<div class="leave-detail-row"><span class="ldr-label">Filed By</span><span class="ldr-val">${data.filedByName} (on behalf of staff)</span></div>` : ''}
       <div class="leave-detail-row"><span class="ldr-label">Leave Type</span><span class="ldr-val">${leaveType}</span></div>
       <div class="leave-detail-row"><span class="ldr-label">Period</span><span class="ldr-val">${dateFrom} → ${dateTo}</span></div>
       <div class="leave-detail-row"><span class="ldr-label">Working Days</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;">${days}</span></div>
@@ -23640,9 +24347,12 @@ window.submitLeave = async function() {
       <div class="leave-detail-row" style="border:none;padding-top:14px;"><span class="ldr-label"></span><span class="ldr-val"><span style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;color:var(--text-muted);">STATUS: PENDING SUPER ADMIN APPROVAL</span></span></div>
     `;
 
-    showToast('Leave application submitted successfully!');
-    logActivity({ text: `Leave application filed — ${leaveType} (${dateFrom} to ${dateTo}) [${refNo}]`, type: 'leave', green: false });
-    prependActivity({ text: `Leave filed — ${leaveType}, ${days} day(s) starting ${dateFrom}`, green: false });
+    showToast(filedForStaff ? `Leave filed for ${data.applicantName} successfully!` : 'Leave application submitted successfully!');
+    const activityText = filedForStaff
+      ? `Leave filed for ${data.applicantName} by ${data.filedByName} — ${leaveType} (${dateFrom} to ${dateTo}) [${refNo}]`
+      : `Leave application filed — ${leaveType} (${dateFrom} to ${dateTo}) [${refNo}]`;
+    logActivity({ text: activityText, type: 'leave', green: false });
+    prependActivity({ text: `Leave filed — ${leaveType}, ${days} day(s) starting ${dateFrom}${filedForStaff ? ` for ${data.applicantName}` : ''}`, green: false });
 
     renderMyLeaveTable();
     if (window._currentRole === 'super' || window._currentRole === 'admin') renderLeaveAdminTable();
@@ -23683,6 +24393,7 @@ function _renderLeaveDetailModal(l, canReview) {
     <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${l.refNo||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${l.applicantName||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Email</span><span class="ldr-val">${l.applicantEmail||'—'}</span></div>
+    ${l.filedByAdmin ? `<div class="leave-detail-row"><span class="ldr-label">Filed By</span><span class="ldr-val">${l.filedByName||'—'} (on behalf of staff)</span></div>` : ''}
     <div class="leave-detail-row"><span class="ldr-label">Leave Type</span><span class="ldr-val">${l.leaveType||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Period</span><span class="ldr-val" style="font-family:var(--mono);">${l.dateFrom||'—'} → ${l.dateTo||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Working Days</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;font-size:1rem;">${l.days||'—'}</span></div>
@@ -24843,10 +25554,12 @@ window.fixOBRefNumbers = async function() {
 
 window.openOBModal = function() {
   // Reset form
-  ['ob-destination','ob-purpose','ob-transport','ob-budget','ob-log-type'].forEach(id => {
+  ['ob-destination','ob-purpose','ob-transport','ob-budget','ob-log-type','ob-transport-custom'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  const obCustomTransportEl = document.getElementById('ob-transport-custom');
+  if (obCustomTransportEl) obCustomTransportEl.style.display = 'none';
 
   // Auto-populate ref and today date
   const refEl = document.getElementById('ob-ref-no');
@@ -24879,6 +25592,19 @@ function fmtOBTime(t) {
   return `${h12}:${String(m).padStart(2,'0')} ${period}`;
 }
 
+// ── Toggle custom transport input based on Mode of Transport select ──
+function toggleOBCustomTransport(){
+  const sel = document.getElementById('ob-transport');
+  const customEl = document.getElementById('ob-transport-custom');
+  if(!sel || !customEl) return;
+  if(sel.value === 'Custom'){
+    customEl.style.display = 'block';
+  } else {
+    customEl.style.display = 'none';
+    customEl.value = '';
+  }
+}
+
 // ── Submit OB Request ──
 window.submitOB = async function() {
   const fb   = window._fb;
@@ -24888,7 +25614,10 @@ window.submitOB = async function() {
   const refNo         = document.getElementById('ob-ref-no')?.value.trim();
   const destination   = document.getElementById('ob-destination')?.value.trim();
   const purpose       = document.getElementById('ob-purpose')?.value.trim();
-  const transport     = document.getElementById('ob-transport')?.value;
+  let transport       = document.getElementById('ob-transport')?.value;
+  if (transport === 'Custom') {
+    transport = document.getElementById('ob-transport-custom')?.value.trim();
+  }
   const budgetRaw     = document.getElementById('ob-budget')?.value;
   const obLogType     = document.getElementById('ob-log-type')?.value || '';
 
@@ -24900,7 +25629,11 @@ window.submitOB = async function() {
   // Validation
   if (!destination) { setMsg('⚠ Destination is required.', true); return; }
   if (!purpose)     { setMsg('⚠ Business purpose / objective is required.', true); return; }
-  if (!transport)   { setMsg('⚠ Mode of transport is required.', true); return; }
+  if (!transport)   {
+    const rawTransport = document.getElementById('ob-transport')?.value;
+    setMsg(rawTransport === 'Custom' ? '⚠ Please enter the custom mode of transport.' : '⚠ Mode of transport is required.', true);
+    return;
+  }
   if (!obLogType)   { setMsg('⚠ Please select OB Out or OB In.', true); return; }
   const budget = parseFloat(budgetRaw);
   if (!budgetRaw || isNaN(budget) || budget < 0) { setMsg('⚠ A valid estimated budget is required.', true); return; }
@@ -25360,6 +26093,785 @@ window.cancelOB = async function(id) {
     showToast('Official Business Trip request cancelled.');
   } catch(e) { showToast('Error: ' + (e.message || e)); }
 };
+
+// ═══════════════════════════════════════════════════════════════
+//  ✦ CASH ADVANCE MODULE
+//  Collection: cashAdvances
+//  Anyone can file a request; approval stays Super Admin only.
+//  Sits right below Expenses in the nav and page flow.
+//
+//  SECURITY / DATA-INTEGRITY NOTES:
+//  • All user-supplied text (purpose, notes, reject/void reasons, applicant
+//    name/email) is escaped with escapeHtml() before being placed into
+//    innerHTML anywhere in this module, so a request containing something
+//    like "<img src=x onerror=...>" as its purpose can't inject markup or
+//    script into the admin's or applicant's own screen.
+//  • Every mutating action (approve/reject/void/delete/cancel) re-verifies
+//    role AND re-reads the live document inside a Firestore transaction
+//    before writing, so it can never act on stale/local state — e.g. two
+//    admins can't both approve the same request, and a request can't be
+//    voided if it was rejected/deleted a moment earlier by someone else.
+//  • Client-side role checks (window._currentRole === 'super') are a UX
+//    convenience only, not the real security boundary — the Firestore
+//    Security Rules for the `cashAdvances` collection must independently
+//    enforce that only Super Admin can write status/approve/reject/void
+//    fields. These checks don't replace that; they just avoid unnecessary
+//    round-trips and give the user immediate feedback.
+// ═══════════════════════════════════════════════════════════════
+
+// ── Escape untrusted text before it's placed into innerHTML anywhere ──
+// Prevents any user-entered field (purpose, notes, rejection/void reasons,
+// names, emails, etc.) from being interpreted as HTML/script. Reused across
+// every render function in this module.
+window.escapeHtml = window.escapeHtml || function(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+const escapeHtml = window.escapeHtml;
+
+let MY_CA  = [];
+let ALL_CA = [];
+let CA_USER_NAMES = {};
+
+// Tracks which Cash Advance record IDs currently have an approve/reject/void/
+// delete/cancel action in flight. Same purpose as _caSubmitInFlight above: a
+// fixed-timeout button guard can't be trusted once a real network round-trip
+// is involved, so these functions check/lock this set for their own record's
+// id and stay locked for the actual duration of the Firestore call.
+const _caActionInFlight = new Set();
+
+// ── Fetch full names for all users so the Cash Advance tables/detail views ──
+// can display each applicant's real name.
+async function _loadCAUserNames() {
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    snap.docs.forEach(d => {
+      const u = d.data();
+      const name = u.fullName || u.displayName || '';
+      if (name) CA_USER_NAMES[d.id] = name;
+    });
+  } catch(e) { console.warn('Could not load user names for Cash Advance:', e); }
+}
+
+// ── Preferred display name for a cash advance's applicant ──
+function caApplicantName(ca) {
+  return (ca && ca.applicantUid && CA_USER_NAMES[ca.applicantUid]) || (ca && ca.applicantName) || '—';
+}
+
+// ── Generate Cash Advance Ref Number ──
+// Numbers come from a single shared Firestore counter doc
+// (counters/cashAdvances), incremented atomically inside a transaction —
+// same approach as getNextPOSequence(). An in-memory counter (or one derived
+// from whatever's currently loaded in ALL_CA/MY_CA) would reset per session
+// and, worse, a regular user only ever has their OWN requests loaded — so
+// every user would independently start counting from ca-00000001 and
+// collide with everyone else's numbers. A single server-side counter that
+// every submission atomically increments is what actually keeps numbers
+// unique across every user, device, and session.
+let _lastCASeqError = null; // set whenever getNextCASequence has to fall back, so submitCA can warn the user instead of silently reusing numbers
+let caCounter = 1; // last-resort in-memory fallback only, if the shared counter can't be reached
+
+async function getNextCASequence(){
+  const fb = window._fb;
+  _lastCASeqError = null;
+  if(!fb){ _lastCASeqError = 'No database connection.'; return caCounter++; }
+
+  try {
+    const counterRef = fb.doc(fb.db, 'counters', 'cashAdvances');
+    const nextSeq = await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(counterRef);
+      const current = snap.exists() ? (parseInt(snap.data().seq) || 0) : 0; // starts at 0 → first request is 00000001
+      const next = current + 1;
+      tx.set(counterRef, { seq: next }, { merge: true });
+      return next;
+    });
+    return nextSeq;
+  } catch(e){
+    // Almost always a Firestore security-rules issue: the 'counters'
+    // collection has no matching rule yet, so the read/write gets silently
+    // rejected and — without this flag — the caller would fall back to a
+    // local counter (which restarts at 1 per session/user) with no visible
+    // sign anything went wrong.
+    console.error('Cash Advance sequence counter failed, falling back to local counter:', e);
+    _lastCASeqError = e.code || e.message || String(e);
+    return caCounter++;
+  }
+}
+
+// ── Load page (called from showPage) ──
+window.loadCashAdvancePage = async function() {
+  await loadCAFromFirestore();
+  _loadCAUserNames().then(() => {
+    renderMyCATable();
+    if (window._currentRole === 'super' || window._currentRole === 'admin') renderCAAdminTable();
+  });
+  renderMyCATable();
+  const role = window._currentRole;
+  const adminPanel = document.getElementById('ca-admin-panel');
+  if (role === 'super' || role === 'admin') {
+    if (adminPanel) adminPanel.style.display = '';
+    renderCAAdminTable();
+  } else {
+    if (adminPanel) adminPanel.style.display = 'none';
+  }
+  updateCANavBadge();
+};
+
+async function loadCAFromFirestore() {
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) return;
+  const role = window._currentRole;
+  const sortDesc = (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+
+  try {
+    if (role === 'super' || role === 'admin') {
+      // Admin/Super: load all, then filter own from that
+      const allSnap = await fb.getDocs(fb.collection(fb.db, 'cashAdvances'));
+      ALL_CA = allSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort(sortDesc);
+      MY_CA  = ALL_CA.filter(c => c.applicantUid === user.uid);
+    } else {
+      // Regular user: only their own — everyone can file
+      const mySnap = await fb.getDocs(fb.query(
+        fb.collection(fb.db, 'cashAdvances'),
+        fb.where('applicantUid', '==', user.uid)
+      ));
+      MY_CA = mySnap.docs.map(d => ({ id: d.id, ...d.data() })).sort(sortDesc);
+    }
+  } catch(e) {
+    console.error('loadCAFromFirestore error:', e);
+  }
+}
+
+window.openCAModal = function() {
+  // Reset form
+  ['ca-purpose','ca-amount','ca-date-needed','ca-notes'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  // Ref # is only assigned once the request is actually submitted (see
+  // submitCA), pulled atomically from the shared Firestore counter — so
+  // just show the placeholder here rather than reserving a number that
+  // might never get used if the user cancels out of this modal.
+  const refEl = document.getElementById('ca-ref-no');
+  if (refEl) refEl.value = '';
+  const filedEl = document.getElementById('ca-date-filed');
+  if (filedEl) filedEl.value = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+
+  // Clear messages
+  const msgEl = document.getElementById('ca-form-msg');
+  if (msgEl) msgEl.innerHTML = '';
+  const btn = document.getElementById('ca-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Submit for Approval'; }
+
+  document.getElementById('ca-form-wrap').style.display = '';
+  document.getElementById('ca-confirm-wrap').style.display = 'none';
+  document.getElementById('modal-ca').classList.add('active');
+};
+
+window.closeCAModal = function() {
+  document.getElementById('modal-ca').classList.remove('active');
+};
+
+// ── Submit Cash Advance Request — any role can file ──
+// Tracks whether a submission is actively in flight. This is the REAL guard
+// against duplicate Cash Advance records — unlike the global click guard
+// (which only disables a button for a fixed ~1.2s), this stays locked for
+// however long the actual Firestore round-trip takes, so a slow connection
+// can never let a second click sneak through and create a duplicate request.
+let _caSubmitInFlight = false;
+
+window.submitCA = async function() {
+  if (_caSubmitInFlight) return; // a submission is already running — ignore this click entirely
+
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) { showToast('Not authenticated.'); return; }
+
+  const purpose    = document.getElementById('ca-purpose')?.value.trim();
+  const amountRaw  = document.getElementById('ca-amount')?.value;
+  const dateNeeded = document.getElementById('ca-date-needed')?.value;
+  const notes      = document.getElementById('ca-notes')?.value.trim();
+
+  const setMsg = (msg, red) => {
+    const el = document.getElementById('ca-form-msg');
+    if (el) el.innerHTML = `<span style="font-family:var(--mono);font-size:0.75rem;color:${red ? '#ef5350' : 'var(--green)'}">${msg}</span>`;
+  };
+
+  // Validation
+  if (!purpose) { setMsg('⚠ Purpose / reason is required.', true); return; }
+  if (purpose.length > 500) { setMsg('⚠ Purpose must be 500 characters or fewer.', true); return; }
+  if (notes && notes.length > 1000) { setMsg('⚠ Notes must be 1000 characters or fewer.', true); return; }
+
+  // Strict amount validation: must be a plain positive number with at most 2
+  // decimal places (rejects things like "1e5", "-100", "12.999", "abc123").
+  if (!amountRaw || !/^\d+(\.\d{1,2})?$/.test(String(amountRaw).trim())) {
+    setMsg('⚠ Enter a valid amount (numbers only, up to 2 decimal places).', true); return;
+  }
+  const amount = parseFloat(amountRaw);
+  if (!isFinite(amount) || amount <= 0) { setMsg('⚠ A valid amount greater than 0 is required.', true); return; }
+  if (amount > 10000000) { setMsg('⚠ Amount looks unusually large — please double-check it (max ₱10,000,000).', true); return; }
+
+  if (!dateNeeded) { setMsg('⚠ Date needed is required.', true); return; }
+  const dateNeededObj = new Date(dateNeeded + 'T00:00:00');
+  if (isNaN(dateNeededObj.getTime())) { setMsg('⚠ Date needed is not a valid date.', true); return; }
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  if (dateNeededObj < todayStart) { setMsg('⚠ Date needed cannot be in the past.', true); return; }
+
+  const btn = document.getElementById('ca-submit-btn');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  setMsg('');
+  _caSubmitInFlight = true;
+
+  try {
+    // Resolve the applicant's actual name from their profile, rather than
+    // falling back to their raw email/gmail address.
+    let realName = user.displayName || user.email.split('@')[0];
+    try {
+      const meSnap = await fb.getDoc(fb.doc(fb.db, 'users', user.uid));
+      if (meSnap.exists()) {
+        const meData = meSnap.data();
+        realName = meData.fullName || meData.displayName || realName;
+      }
+    } catch(e) { console.warn('Could not fetch profile for Cash Advance applicant name:', e); }
+
+    // Pull the next number from the shared Firestore counter right before
+    // writing the request, so it's assigned atomically and can't collide
+    // with a number another user is submitting at the same time.
+    const caSeq = await getNextCASequence();
+    const refNo = 'ca-' + String(caSeq).padStart(8, '0');
+    if (_lastCASeqError) {
+      // The shared counter couldn't be reached/written — almost always a
+      // missing Firestore security rule for the 'counters' collection.
+      // Surface this clearly instead of quietly issuing a number that may
+      // collide with someone else's, since that's exactly the bug this
+      // counter exists to prevent.
+      console.warn('Cash Advance ref number generated from local fallback counter, not the shared Firestore counter. Reason:', _lastCASeqError);
+      showToast(`⚠ Could not reach the shared ref# counter (${_lastCASeqError}) — this ref# may not be unique. Ask your developer to add a Firestore rule allowing read/write on counters/cashAdvances.`, 9000);
+    }
+    const refEl = document.getElementById('ca-ref-no');
+    if (refEl) refEl.value = refNo;
+
+    const payload = {
+      refNo,
+      applicantUid:   user.uid,
+      applicantName:  realName,
+      applicantEmail: user.email,
+      purpose,
+      amount,
+      dateNeeded,
+      notes,
+      status:        'pending', // every request needs Super Admin approval
+      createdAt:     fb.serverTimestamp(),
+    };
+
+    const docRef = await fb.addDoc(fb.collection(fb.db, 'cashAdvances'), payload);
+    payload.id = docRef.id;
+    payload.createdAt = { seconds: Math.floor(Date.now() / 1000) };
+
+    MY_CA.unshift(payload);
+    ALL_CA.unshift(payload);
+
+    // Show confirmation
+    document.getElementById('ca-form-wrap').style.display = 'none';
+    document.getElementById('ca-confirm-body').innerHTML = `
+      <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${escapeHtml(refNo)}</span></div>
+      <div class="leave-detail-row"><span class="ldr-label">Purpose</span><span class="ldr-val">${escapeHtml(purpose)}</span></div>
+      <div class="leave-detail-row"><span class="ldr-label">Date Needed</span><span class="ldr-val" style="font-family:var(--mono);">${escapeHtml(dateNeeded)}</span></div>
+      ${notes ? `<div class="leave-detail-row"><span class="ldr-label">Notes</span><span class="ldr-val">${escapeHtml(notes)}</span></div>` : ''}
+      <div class="leave-detail-row" style="border:none;"><span class="ldr-label">Amount</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;color:var(--red);">₱${amount.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+      <div style="margin-top:14px;padding:10px 12px;background:rgba(21,101,192,0.06);border:1px solid rgba(21,101,192,0.2);font-family:var(--mono);font-size:0.72rem;color:var(--red);letter-spacing:0.04em;">
+        STATUS: PENDING SUPER ADMIN APPROVAL &nbsp;·&nbsp; You will be notified once reviewed.
+      </div>
+    `;
+    document.getElementById('ca-confirm-wrap').style.display = '';
+
+    renderMyCATable();
+    if (window._currentRole === 'super' || window._currentRole === 'admin') renderCAAdminTable();
+    updateCANavBadge();
+
+    const actText = `Cash Advance filed — ${realName} — ₱${amount.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})} [${refNo}]`;
+    prependActivity({ text: actText, green: false });
+    if (typeof logActivity === 'function') logActivity({ text: actText, type: 'cashadvance_filed', green: false });
+    showToast('Cash Advance request submitted ✓');
+
+  } catch(e) {
+    console.error('Cash Advance submit error:', e);
+    setMsg('Failed to submit. Please try again. [' + (e.code || e.message || e) + ']', true);
+    btn.disabled = false; btn.textContent = 'Submit for Approval';
+  } finally {
+    _caSubmitInFlight = false;
+  }
+};
+
+// ── Render My Cash Advance Table ──
+function renderMyCATable() {
+  const tbody = document.getElementById('my-ca-tbody');
+  const empty = document.getElementById('my-ca-empty');
+  if (!tbody) return;
+  if (!MY_CA.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  const fmt = (n) => Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  tbody.innerHTML = MY_CA.map(ca => {
+    const filed = ca.createdAt?.seconds
+      ? new Date(ca.createdAt.seconds * 1000).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
+      : '—';
+    const canCancel = ca.status === 'pending';
+    return `
+      <tr style="cursor:pointer;" onclick="viewMyCADetail('${ca.id}')">
+        <td style="font-family:var(--mono);font-weight:600;color:var(--red);">${escapeHtml(ca.refNo)||'—'}</td>
+        <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${filed}</td>
+        <td style="font-size:0.78rem;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(ca.purpose)}">${escapeHtml(ca.purpose)||'—'}</td>
+        <td style="font-family:var(--mono);font-size:0.78rem;">${escapeHtml(ca.dateNeeded)||'—'}</td>
+        <td style="font-family:var(--mono);text-align:right;font-weight:600;">₱${fmt(ca.amount||0)}</td>
+        <td style="text-align:center;"><span class="leave-status ${escapeHtml(ca.status||'pending')}">${escapeHtml(ca.status||'pending')}</span></td>
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+          ${canCancel ? `<button class="btn btn-ghost" onclick="cancelCA('${ca.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0;color:#ef5350;border-color:rgba(239,83,80,0.4);">Cancel</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ── Render Admin Cash Advance Table ──
+function renderCAAdminTable() {
+  const tbody  = document.getElementById('admin-ca-tbody');
+  const empty  = document.getElementById('admin-ca-empty');
+  const search = (document.getElementById('ca-search')?.value || '').toLowerCase();
+  const stFilter = document.getElementById('ca-status-filter')?.value || '';
+  if (!tbody) return;
+
+  let list = ALL_CA.filter(ca => {
+    if (stFilter && ca.status !== stFilter) return false;
+    if (search) {
+      return (caApplicantName(ca)||'').toLowerCase().includes(search)
+          || (ca.purpose||'').toLowerCase().includes(search)
+          || (ca.refNo||'').toLowerCase().includes(search);
+    }
+    return true;
+  });
+
+  if (!list.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const fmt = (n) => Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  tbody.innerHTML = list.map(ca => {
+    const filed = ca.createdAt?.seconds
+      ? new Date(ca.createdAt.seconds * 1000).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
+      : '—';
+    // Approve/Reject/Delete stay Super Admin only — Admin can view/review the queue.
+    return `
+      <tr style="cursor:pointer;" onclick="openCADetail('${ca.id}')">
+        <td style="font-family:var(--mono);font-weight:600;color:var(--red);">${escapeHtml(ca.refNo)||'—'}</td>
+        <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${filed}</td>
+        <td style="font-weight:600;">${escapeHtml(caApplicantName(ca))}</td>
+        <td style="font-size:0.78rem;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(ca.purpose)}">${escapeHtml(ca.purpose)||'—'}</td>
+        <td style="font-family:var(--mono);font-size:0.78rem;">${escapeHtml(ca.dateNeeded)||'—'}</td>
+        <td style="font-family:var(--mono);text-align:right;font-weight:600;">₱${fmt(ca.amount||0)}</td>
+        <td style="text-align:center;"><span class="leave-status ${escapeHtml(ca.status||'pending')}">${escapeHtml(ca.status||'pending')}</span></td>
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+          <button class="btn btn-ghost" onclick="openCADetail('${ca.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0 4px 0 0;">Review</button>
+          ${window._currentRole === 'super' ? `<button class="btn btn-ghost" onclick="deleteCA('${ca.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0;color:#ef5350;border-color:rgba(239,83,80,0.4);">Delete</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Update pending count badge
+  const pendingCount = ALL_CA.filter(c => c.status === 'pending').length;
+  const countEl = document.getElementById('ca-pending-count');
+  if (countEl) {
+    countEl.textContent = `${pendingCount} PENDING`;
+    countEl.style.display = pendingCount > 0 ? '' : 'none';
+  }
+}
+
+// ── Update Nav Badge ──
+function updateCANavBadge() {
+  const pending = ALL_CA.filter(c => c.status === 'pending').length;
+  const badge = document.getElementById('badge-ca');
+  if (!badge) return;
+  if (pending > 0 && (window._currentRole === 'super' || window._currentRole === 'admin')) {
+    badge.textContent = pending;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ── View My Cash Advance Detail (non-admin) ──
+window.viewMyCADetail = function(id) {
+  const ca = MY_CA.find(x => x.id === id);
+  if (!ca) return;
+  _renderCADetailModal(ca, false);
+  document.getElementById('modal-ca-detail').classList.add('active');
+};
+
+// ── Open Cash Advance Detail (admin review) ──
+window.openCADetail = function(id) {
+  const ca = ALL_CA.find(x => x.id === id) || MY_CA.find(x => x.id === id);
+  if (!ca) return;
+  const canReview = (window._currentRole === 'super') && ca.status === 'pending';
+  _renderCADetailModal(ca, canReview);
+  document.getElementById('modal-ca-detail').classList.add('active');
+};
+
+function _renderCADetailModal(ca, canReview) {
+  const fmt = (n) => Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const filed = ca.createdAt?.seconds
+    ? new Date(ca.createdAt.seconds * 1000).toLocaleString('en-PH', { dateStyle:'medium', timeStyle:'short' })
+    : '—';
+  const reviewedAt = ca.reviewedAt?.seconds
+    ? new Date(ca.reviewedAt.seconds * 1000).toLocaleString('en-PH', { dateStyle:'medium', timeStyle:'short' })
+    : null;
+  const voidedAt = ca.voidedAt?.seconds
+    ? new Date(ca.voidedAt.seconds * 1000).toLocaleString('en-PH', { dateStyle:'medium', timeStyle:'short' })
+    : null;
+
+  document.getElementById('ca-detail-body').innerHTML = `
+    <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${escapeHtml(ca.refNo)||'—'}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${escapeHtml(caApplicantName(ca))}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Email</span><span class="ldr-val">${escapeHtml(ca.applicantEmail)||'—'}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Purpose</span><span class="ldr-val">${escapeHtml(ca.purpose)||'—'}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Date Needed</span><span class="ldr-val" style="font-family:var(--mono);">${escapeHtml(ca.dateNeeded)||'—'}</span></div>
+    ${ca.notes ? `<div class="leave-detail-row"><span class="ldr-label">Notes</span><span class="ldr-val">${escapeHtml(ca.notes)}</span></div>` : ''}
+    <div class="leave-detail-row"><span class="ldr-label">Amount Requested</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;font-size:1rem;color:var(--red);">₱${fmt(ca.amount||0)}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Date Filed</span><span class="ldr-val">${filed}</span></div>
+    <div class="leave-detail-row" style="border:none;"><span class="ldr-label">Status</span><span class="ldr-val"><span class="leave-status ${escapeHtml(ca.status||'pending')}">${escapeHtml(ca.status||'pending')}</span></span></div>
+    ${ca.rejectReason ? `<div class="leave-detail-row" style="border:none;padding-top:0;"><span class="ldr-label">Rejection Reason</span><span class="ldr-val" style="color:#ef5350;font-style:italic;">${escapeHtml(ca.rejectReason)}</span></div>` : ''}
+    ${reviewedAt ? `<div class="leave-detail-row" style="border:none;padding-top:0;"><span class="ldr-label">Reviewed By</span><span class="ldr-val">${escapeHtml(ca.reviewedByName)||'—'} on ${reviewedAt}</span></div>` : ''}
+    ${ca.voidReason ? `<div class="leave-detail-row" style="border:none;padding-top:0;"><span class="ldr-label">Void Reason</span><span class="ldr-val" style="color:#9ca3af;font-style:italic;">${escapeHtml(ca.voidReason)}</span></div>` : ''}
+    ${voidedAt ? `<div class="leave-detail-row" style="border:none;padding-top:0;"><span class="ldr-label">Voided By</span><span class="ldr-val">${escapeHtml(ca.voidedByName)||'—'} on ${voidedAt}</span></div>` : ''}
+  `;
+
+  const rejectRow = document.getElementById('ca-detail-reject-row');
+  const voidRow   = document.getElementById('ca-detail-void-row');
+  const actDiv    = document.getElementById('ca-detail-actions');
+  const rr        = document.getElementById('ca-reject-reason');
+  const vr        = document.getElementById('ca-void-reason');
+  if (rejectRow) rejectRow.style.display = 'none';
+  if (voidRow) voidRow.style.display = 'none';
+  if (rr) rr.value = '';
+  if (vr) vr.value = '';
+
+  const canVoid = window._currentRole === 'super' && ca.status === 'approved';
+
+  if (canReview) {
+    actDiv.innerHTML = `
+      <button class="btn btn-red" onclick="approveCA('${ca.id}')" style="flex:1;">✓ Approve</button>
+      <button class="btn btn-ghost" onclick="showCARejectForm('${ca.id}')" style="flex:1;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">✕ Reject</button>
+      <button class="btn btn-ghost" onclick="deleteCA('${ca.id}')" style="width:120px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeCADetail()" style="width:120px;margin:0;">Cancel</button>
+    `;
+  } else if (window._currentRole === 'super') {
+    actDiv.innerHTML = `
+      ${canVoid ? `<button class="btn btn-ghost" onclick="showCAVoidForm('${ca.id}')" style="flex:1;margin:0;border-color:rgba(156,163,175,0.4);color:#9ca3af;">⦸ Void</button>` : ''}
+      <button class="btn btn-ghost" onclick="deleteCA('${ca.id}')" style="width:140px;margin:0;border-color:rgba(239,83,80,0.4);color:#ef5350;">🗑 Delete</button>
+      <button class="btn btn-ghost" onclick="closeCADetail()" style="width:140px;margin:0;">Close</button>
+    `;
+  } else {
+    actDiv.innerHTML = `
+      <button class="btn btn-ghost" onclick="closeCADetail()" style="width:140px;margin:0;">Close</button>
+    `;
+  }
+}
+
+window.showCARejectForm = function(id) {
+  const rejectRow = document.getElementById('ca-detail-reject-row');
+  const actDiv    = document.getElementById('ca-detail-actions');
+  if (rejectRow) rejectRow.style.display = '';
+  actDiv.innerHTML = `
+    <button class="btn btn-red" onclick="rejectCA('${id}')" style="flex:1;background:#7f1d1d;">✕ Confirm Reject</button>
+    <button class="btn btn-ghost" onclick="openCADetail('${id}')" style="flex:1;margin:0;">Back</button>
+    <button class="btn btn-ghost" onclick="closeCADetail()" style="width:120px;margin:0;">Cancel</button>
+  `;
+};
+
+window.showCAVoidForm = function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  const voidRow = document.getElementById('ca-detail-void-row');
+  const actDiv  = document.getElementById('ca-detail-actions');
+  if (voidRow) voidRow.style.display = '';
+  actDiv.innerHTML = `
+    <button class="btn btn-red" onclick="voidCA('${id}')" style="flex:1;background:#4b5563;">⦸ Confirm Void</button>
+    <button class="btn btn-ghost" onclick="openCADetail('${id}')" style="flex:1;margin:0;">Back</button>
+    <button class="btn btn-ghost" onclick="closeCADetail()" style="width:120px;margin:0;">Cancel</button>
+  `;
+};
+
+window.closeCADetail = function() {
+  document.getElementById('modal-ca-detail').classList.remove('active');
+};
+
+// ── Approve Cash Advance (Super Admin only) ──
+// ── Approve Cash Advance (Super Admin only) ──
+// Runs inside a transaction: re-reads the live document and only proceeds if
+// it still exists and is still 'pending'. This closes the race where two
+// admins have the same request open and both click Approve/Reject at once,
+// or where the request was voided/deleted a moment before this click landed.
+window.approveCA = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (_caActionInFlight.has(id)) return; // already processing this exact record — ignore the repeat click
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) return;
+  _caActionInFlight.add(id);
+  try {
+    const ref = fb.doc(fb.db, 'cashAdvances', id);
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('This request no longer exists.');
+      if (snap.data().status !== 'pending') throw new Error('This request is no longer pending — it may have already been reviewed by someone else.');
+      tx.update(ref, {
+        status:         'approved',
+        reviewedBy:     user.uid,
+        reviewedByName: user.displayName || user.email,
+        reviewedAt:     fb.serverTimestamp(),
+      });
+    });
+    const idx = ALL_CA.findIndex(c => c.id === id);
+    if (idx > -1) { ALL_CA[idx].status = 'approved'; ALL_CA[idx].reviewedByName = user.displayName || user.email; }
+    const mi  = MY_CA.findIndex(c => c.id === id);
+    if (mi  > -1) MY_CA[mi].status = 'approved';
+    closeCADetail();
+    renderMyCATable();
+    renderCAAdminTable();
+    updateCANavBadge();
+    const ca = ALL_CA.find(c => c.id === id);
+    const actText = `Cash Advance approved — ${ca?.applicantName||''} — ₱${(ca?.amount||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})} [${ca?.refNo||id}]`;
+    prependActivity({ text: actText, green: true });
+    if (typeof logActivity === 'function') logActivity({ text: actText, type: 'cashadvance_approved', green: true });
+    showToast('Cash Advance request approved ✓');
+  } catch(e) {
+    showToast('Error: ' + (e.message || e));
+    // The record may have changed under us — refresh from Firestore so the UI
+    // (status badge, available buttons) reflects reality instead of going stale.
+    await loadCAFromFirestore(); renderMyCATable(); renderCAAdminTable(); updateCANavBadge();
+  } finally {
+    _caActionInFlight.delete(id);
+  }
+};
+
+// ── Reject Cash Advance (Super Admin only) ──
+window.rejectCA = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (_caActionInFlight.has(id)) return;
+  const reason = document.getElementById('ca-reject-reason')?.value.trim();
+  if (!reason) { showToast('Please enter a rejection reason.'); return; }
+  if (reason.length > 500) { showToast('Rejection reason must be 500 characters or fewer.'); return; }
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) return;
+  _caActionInFlight.add(id);
+  try {
+    const ref = fb.doc(fb.db, 'cashAdvances', id);
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('This request no longer exists.');
+      if (snap.data().status !== 'pending') throw new Error('This request is no longer pending — it may have already been reviewed by someone else.');
+      tx.update(ref, {
+        status:         'rejected',
+        rejectReason:   reason,
+        reviewedBy:     user.uid,
+        reviewedByName: user.displayName || user.email,
+        reviewedAt:     fb.serverTimestamp(),
+      });
+    });
+    const idx = ALL_CA.findIndex(c => c.id === id);
+    if (idx > -1) { ALL_CA[idx].status = 'rejected'; ALL_CA[idx].rejectReason = reason; ALL_CA[idx].reviewedByName = user.displayName || user.email; }
+    const mi  = MY_CA.findIndex(c => c.id === id);
+    if (mi  > -1) { MY_CA[mi].status = 'rejected'; MY_CA[mi].rejectReason = reason; }
+    closeCADetail();
+    renderMyCATable();
+    renderCAAdminTable();
+    updateCANavBadge();
+    const ca = ALL_CA.find(c => c.id === id);
+    const actText = `Cash Advance rejected — ${ca?.applicantName||''} [${ca?.refNo||id}]`;
+    prependActivity({ text: actText, green: false });
+    if (typeof logActivity === 'function') logActivity({ text: actText, type: 'cashadvance_rejected', green: false });
+    showToast('Cash Advance request rejected.');
+  } catch(e) {
+    showToast('Error: ' + (e.message || e));
+    await loadCAFromFirestore(); renderMyCATable(); renderCAAdminTable(); updateCANavBadge();
+  } finally {
+    _caActionInFlight.delete(id);
+  }
+};
+
+// ── Void Cash Advance (Super Admin only) ──
+// Voiding is for a request that was already APPROVED but needs to be nullified
+// afterward (e.g. the advance was never actually released, or must be reversed
+// for audit reasons). Unlike Delete, voiding keeps the record — with a reason
+// and a timestamp — rather than erasing it, so it stays visible in the audit trail.
+window.voidCA = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (_caActionInFlight.has(id)) return;
+  const reason = document.getElementById('ca-void-reason')?.value.trim();
+  if (!reason) { showToast('Please enter a void reason.'); return; }
+  if (reason.length > 500) { showToast('Void reason must be 500 characters or fewer.'); return; }
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) return;
+  _caActionInFlight.add(id);
+  try {
+    const ref = fb.doc(fb.db, 'cashAdvances', id);
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('This request no longer exists.');
+      // Re-check against the LIVE document, not local state — only an
+      // approved request can be voided, and only if it hasn't already
+      // been voided/deleted/changed by someone else in the meantime.
+      if (snap.data().status !== 'approved') throw new Error('Only approved Cash Advances can be voided — this one\'s status has changed.');
+      tx.update(ref, {
+        status:        'voided',
+        voidReason:    reason,
+        voidedBy:      user.uid,
+        voidedByName:  user.displayName || user.email,
+        voidedAt:      fb.serverTimestamp(),
+      });
+    });
+    const idx = ALL_CA.findIndex(c => c.id === id);
+    if (idx > -1) { ALL_CA[idx].status = 'voided'; ALL_CA[idx].voidReason = reason; ALL_CA[idx].voidedByName = user.displayName || user.email; }
+    const mi  = MY_CA.findIndex(c => c.id === id);
+    if (mi  > -1) { MY_CA[mi].status = 'voided'; MY_CA[mi].voidReason = reason; MY_CA[mi].voidedByName = user.displayName || user.email; }
+    closeCADetail();
+    renderMyCATable();
+    renderCAAdminTable();
+    updateCANavBadge();
+    const ca = ALL_CA.find(c => c.id === id);
+    const actText = `Cash Advance voided — ${ca?.applicantName||''} — ₱${(ca?.amount||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})} [${ca?.refNo||id}]`;
+    prependActivity({ text: actText, green: false });
+    if (typeof logActivity === 'function') logActivity({ text: actText, type: 'cashadvance_voided', green: false });
+    showToast('Cash Advance request voided.');
+  } catch(e) {
+    showToast('Error: ' + (e.message || e));
+    await loadCAFromFirestore(); renderMyCATable(); renderCAAdminTable(); updateCANavBadge();
+  } finally {
+    _caActionInFlight.delete(id);
+  }
+};
+
+// ── Delete Cash Advance (Super Admin only) ──
+// When a CA is deleted we also decrement the shared counter so the next
+// submission reuses the freed number rather than skipping it.
+// The decrement is wrapped in a transaction that reads the current counter
+// first and only decrements if the counter is still > 0 — a guard against
+// the counter doc being missing or already at zero (which could happen if
+// Firestore rules blocked the earlier write and the fallback local counter
+// was used instead).
+window.deleteCA = async function(id) {
+  if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
+  if (_caActionInFlight.has(id)) return;
+  if (!confirm('Delete this Cash Advance request permanently? This cannot be undone.')) return;
+  const fb = window._fb;
+  if (!fb) return;
+  _caActionInFlight.add(id);
+  try {
+    const ref        = fb.doc(fb.db, 'cashAdvances', id);
+    const counterRef = fb.doc(fb.db, 'counters', 'cashAdvances');
+
+    const snap = await fb.getDoc(ref);
+    if (!snap.exists()) { showToast('This request was already deleted.'); await loadCAFromFirestore(); renderMyCATable(); renderCAAdminTable(); updateCANavBadge(); return; }
+
+    // Run delete + counter decrement atomically so they always stay in sync.
+    await fb.runTransaction(fb.db, async (tx) => {
+      // Re-read inside the transaction to confirm it still exists.
+      const liveSnap = await tx.get(ref);
+      if (!liveSnap.exists()) throw new Error('already-deleted');
+
+      // Decrement the counter (but never below 0).
+      const cSnap   = await tx.get(counterRef);
+      const current = cSnap.exists() ? (parseInt(cSnap.data().seq) || 0) : 0;
+      if (current > 0) {
+        tx.set(counterRef, { seq: current - 1 }, { merge: true });
+      }
+
+      tx.delete(ref);
+    });
+
+    ALL_CA = ALL_CA.filter(c => c.id !== id);
+    MY_CA  = MY_CA.filter(c => c.id !== id);
+    closeCADetail();
+    renderMyCATable();
+    renderCAAdminTable();
+    updateCANavBadge();
+    showToast('Cash Advance request deleted.');
+  } catch(e) {
+    if ((e.message || e) === 'already-deleted') {
+      showToast('This request was already deleted.');
+      await loadCAFromFirestore(); renderMyCATable(); renderCAAdminTable(); updateCANavBadge();
+    } else {
+      showToast('Error: ' + (e.message || e));
+    }
+  } finally { _caActionInFlight.delete(id); }
+};
+
+// ── Cancel Cash Advance (applicant, pending only) ──
+// Transaction re-checks that the request is still 'pending' AND still belongs
+// to the person clicking Cancel — a defensive check against calling this
+// function directly (e.g. via the browser console) on a different status or
+// a request that isn't the current user's own.
+window.cancelCA = async function(id) {
+  if (_caActionInFlight.has(id)) return;
+  if (!confirm('Cancel this Cash Advance request? This cannot be undone.')) return;
+  const fb   = window._fb;
+  const user = window._currentFirebaseUser;
+  if (!fb || !user) return;
+  _caActionInFlight.add(id);
+  try {
+    const ref        = fb.doc(fb.db, 'cashAdvances', id);
+    const counterRef = fb.doc(fb.db, 'counters', 'cashAdvances');
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('This request no longer exists.');
+      const data = snap.data();
+      if (data.status !== 'pending') throw new Error('Only pending requests can be cancelled — this one has already been reviewed.');
+      if (data.applicantUid !== user.uid) throw new Error('You can only cancel your own requests.');
+
+      // Decrement the shared counter so the freed ref# is reused next time.
+      const cSnap   = await tx.get(counterRef);
+      const current = cSnap.exists() ? (parseInt(cSnap.data().seq) || 0) : 0;
+      if (current > 0) {
+        tx.set(counterRef, { seq: current - 1 }, { merge: true });
+      }
+
+      tx.delete(ref);
+    });
+    MY_CA  = MY_CA.filter(c => c.id !== id);
+    ALL_CA = ALL_CA.filter(c => c.id !== id);
+    renderMyCATable();
+    if (window._currentRole === 'super' || window._currentRole === 'admin') renderCAAdminTable();
+    updateCANavBadge();
+    showToast('Cash Advance request cancelled.');
+  } catch(e) {
+    showToast('Error: ' + (e.message || e));
+    await loadCAFromFirestore(); renderMyCATable();
+    if (window._currentRole === 'super' || window._currentRole === 'admin') renderCAAdminTable();
+    updateCANavBadge();
+  } finally {
+    _caActionInFlight.delete(id);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  END CASH ADVANCE MODULE
+// ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
 </script>
