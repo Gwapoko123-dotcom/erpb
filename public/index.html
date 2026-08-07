@@ -3777,6 +3777,10 @@ body.app-running #screen-app   { display:flex !important; }
                 <option value="converted">Converted</option>
                 <option value="lost">Lost</option>
               </select>
+              <button id="lead-requests-btn" onclick="openLeadRequestsModal()" style="display:none;position:relative;background:rgba(147,51,234,0.1);color:#9333ea;border:1px solid rgba(147,51,234,0.35);padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;white-space:nowrap;align-items:center;gap:6px;">
+                ⊘ Lead Requests
+                <span id="lead-req-badge" style="display:none;background:var(--red);color:#fff;border-radius:999px;font-size:0.62rem;padding:1px 6px;font-family:var(--mono);"></span>
+              </button>
               <button class="btn btn-red" id="leads-new-btn" onclick="openNewLeadModal()" style="padding:7px 18px;white-space:nowrap;">+ New Lead</button>
             </div>
           </div>
@@ -11553,7 +11557,7 @@ function showPage(name, el){
   if(name === 'sales'){ window.loadGlobalSalesLogPage(); }
   if(name === 'expenses'){ window.loadGlobalExpensesLogPage('init'); }
   if(name === 'quotation'){ loadQuotationsPage(); }
-  if(name === 'leads'){ loadLeadsPage('init'); }
+  if(name === 'leads'){ loadLeadsPage('init'); refreshLeadRequestBadge(); }
   if(name === 'installation'){ loadInstallationPage(); }
   if(name === 'branches'){ loadBranches(); }
   if(name === 'payroll'){ initPayrollPage(); }
@@ -17881,6 +17885,49 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══════════════ PO VOID REQUESTS MODAL ══════════════ -->
+<div class="modal-overlay" id="modal-lead-requests" onclick="if(event.target===this)closeLeadRequestsModal()">
+  <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
+
+    <!-- Header -->
+    <div style="background:var(--bg3);border-bottom:1px solid var(--border2);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:4px;height:18px;background:#9333ea;flex-shrink:0;"></div>
+        <span style="font-family:var(--mono);font-size:0.78rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--text);">LEAD REQUESTS — PENDING APPROVAL</span>
+      </div>
+      <button class="modal-close" onclick="closeLeadRequestsModal()">&#x2715;</button>
+    </div>
+
+    <div style="padding:8px 20px;font-size:0.72rem;color:var(--text-muted);font-family:var(--mono);border-bottom:1px solid var(--border2);flex-shrink:0;">
+      Regular users can request to add or delete a lead. Only a Super Admin can approve these requests.
+    </div>
+
+    <!-- Table -->
+    <div style="overflow-y:auto;flex:1;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:var(--bg3);position:sticky;top:0;">
+            <th style="text-align:left;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Type</th>
+            <th style="text-align:left;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Company / Contact</th>
+            <th style="text-align:left;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Source</th>
+            <th style="text-align:left;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Requested By</th>
+            <th style="text-align:left;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Date</th>
+            <th style="text-align:center;padding:9px 14px;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="lead-req-tbody"></tbody>
+      </table>
+      <div id="lead-req-empty" style="display:none;text-align:center;padding:40px;font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);letter-spacing:0.08em;">
+        ◇<br><br>NO PENDING LEAD REQUESTS
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="background:var(--bg3);border-top:1px solid var(--border2);padding:10px 20px;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;">
+      <button class="btn btn-ghost" onclick="closeLeadRequestsModal()" style="width:120px;margin:0;">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-po-void-requests" onclick="if(event.target===this)closePOVoidRequestsModal()">
   <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
 
@@ -20060,6 +20107,8 @@ let leadsLastDocRef = null;
 let _leadEditId = null;
 let _leadViewId = null;
 let leadIdCounter = 1;
+let MY_LEAD_REQUESTS = []; // this user's own pending/rejected leadRequests — 'user' role only
+let _leadReqViewId = null; // currently-viewed request id (for the request detail modal)
 
 const LEAD_STATUS_COLORS = {
   new:         '#1565c0',
@@ -20076,6 +20125,54 @@ const LEAD_PRIORITY_COLORS = {
   medium: '#f9a825',
   high:   '#c62828'
 };
+
+// Turns this user's own pending/rejected leadRequests into pseudo lead rows
+// so they show up in the same table — the requester needs to see status
+// ("pending approval" / "rejected") and, if rejected, the reason, even
+// though nothing was actually created in `leads` yet. Approved requests
+// aren't included here since they already appear as a real lead once the
+// Super Admin approves them.
+function buildLeadRequestPseudoRows() {
+  return MY_LEAD_REQUESTS.map(r => {
+    const d = r.leadData || {};
+    return {
+      id: 'req_' + r.id,
+      _isRequest: true,
+      _reqId: r.id,
+      _reqStatus: r.status,
+      _rejectReason: r.rejectReason || '',
+      leadId: (r.status === 'rejected' ? 'REJ-' : 'REQ-') + r.id.slice(0, 6).toUpperCase(),
+      company: d.company || '', contact: d.contact || '', email: d.email || '', phone: d.phone || '',
+      source: d.source || '', notes: d.notes || '', followUpDate: d.followUpDate || '',
+      assigneeName: d.assigneeName || '', assigneeEmail: d.assigneeEmail || '',
+      priority: d.priority || 'medium', status: d.status || 'new',
+      createdAt: r.requestedAt
+    };
+  });
+}
+
+function buildLeadsDisplayList() {
+  return [...buildLeadRequestPseudoRows(), ...LEADS_ACTIVE_CHUNK];
+}
+
+// Refreshes both the real leads list and (for a plain user) their own
+// pending/rejected requests, then re-renders the combined table.
+async function loadMyLeadRequests() {
+  const fb = window._fb;
+  const uid = window._currentFirebaseUser?.uid;
+  const role = window._currentRole || 'user';
+  if (role === 'admin' || role === 'super' || !fb || !uid) { MY_LEAD_REQUESTS = []; return; }
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'leadRequests'), fb.where('requestedByUid', '==', uid)));
+    MY_LEAD_REQUESTS = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.type !== 'delete' && (r.status === 'pending' || r.status === 'rejected'))
+      .sort((a, b) => (b.requestedAt?.seconds || 0) - (a.requestedAt?.seconds || 0));
+  } catch (e) {
+    console.warn('Could not load own lead requests:', e);
+    MY_LEAD_REQUESTS = [];
+  }
+}
 
 window.loadLeadsPage = async function(direction = 'init') {
   const tbody   = document.getElementById('leads-tbody');
@@ -20098,18 +20195,26 @@ window.loadLeadsPage = async function(direction = 'init') {
       if (direction === 'forward' && leadsLastDocRef)
         q = fb.query(fb.collection(fb.db, 'leads'), fb.where('assigneeUid', '==', uid), fb.orderBy('createdAt', 'desc'), fb.startAfter(leadsLastDocRef), fb.limit(20));
     }
-    const snap = await fb.getDocs(q);
+    const [snap] = await Promise.all([ fb.getDocs(q), loadMyLeadRequests() ]);
+    const newBtnLabel = (role === 'admin' || role === 'super') ? '+ New Lead' : '+ Request Lead';
     if (snap.empty) {
-      tbody.innerHTML = '';
-      if (emptyEl) emptyEl.style.display = 'block';
       LEADS_ACTIVE_CHUNK = [];
+      const display = buildLeadsDisplayList();
+      if (!display.length) {
+        tbody.innerHTML = '';
+        if (emptyEl) emptyEl.style.display = 'block';
+      } else {
+        renderLeadsTable(display);
+      }
       updateLeadsStats([]);
       const nb = document.getElementById('leads-next-btn'); if (nb) nb.disabled = true;
+      const newBtnEmpty = document.getElementById('leads-new-btn');
+      if (newBtnEmpty) { newBtnEmpty.style.display = ''; newBtnEmpty.textContent = newBtnLabel; }
       return;
     }
     leadsLastDocRef = snap.docs[snap.docs.length - 1];
     LEADS_ACTIVE_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderLeadsTable(LEADS_ACTIVE_CHUNK);
+    renderLeadsTable(buildLeadsDisplayList());
     updateLeadsStats(LEADS_ACTIVE_CHUNK);
     loadLeadConfirmBadges(LEADS_ACTIVE_CHUNK);
     const prevBtn = document.getElementById('leads-prev-btn');
@@ -20118,8 +20223,11 @@ window.loadLeadsPage = async function(direction = 'init') {
     if (nextBtn) nextBtn.disabled = (snap.docs.length < 20);
     const ind = document.getElementById('leads-page-indicator');
     if (ind) ind.textContent = `DISPLAYING ${snap.docs.length} LEAD RECORDS`;
+    // "+ New Lead" is available to everyone now — admin/super save directly,
+    // regular users submit a request that needs Super Admin approval.
     const newBtn = document.getElementById('leads-new-btn');
-    if (newBtn) newBtn.style.display = (role === 'admin' || role === 'super') ? '' : 'none';
+    if (newBtn) newBtn.style.display = '';
+    newBtn && (newBtn.textContent = newBtnLabel);
   } catch (err) {
     console.error('Leads load error:', err);
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;font-family:var(--mono);color:var(--red);">⚠ FAILED TO LOAD LEADS — CHECK FIRESTORE RULES / INDEXES</td></tr>`;
@@ -20143,26 +20251,32 @@ function renderLeadsTable(list) {
   const emptyEl = document.getElementById('leads-empty');
   if (emptyEl) emptyEl.style.display = 'none';
   tbody.innerHTML = list.map(lead => {
+    const isReq    = !!lead._isRequest;
     const status   = lead.status   || 'new';
     const priority = lead.priority || 'medium';
-    const sColor   = LEAD_STATUS_COLORS[status]    || 'var(--text-muted)';
+    let sColor, statusLabel;
+    if (isReq && lead._reqStatus === 'pending') { sColor = '#f9a825'; statusLabel = 'PENDING APPROVAL'; }
+    else if (isReq && lead._reqStatus === 'rejected') { sColor = '#b71c1c'; statusLabel = 'REJECTED'; }
+    else { sColor = LEAD_STATUS_COLORS[status] || 'var(--text-muted)'; statusLabel = status; }
     const pColor   = LEAD_PRIORITY_COLORS[priority] || 'var(--text-muted)';
     const created  = lead.createdAt?.toDate ? lead.createdAt.toDate() : (lead.createdAt ? new Date(lead.createdAt) : new Date());
     const createdStr = created.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' });
     const assigneeName = lead.assigneeName || lead.assigneeEmail || '—';
     const company  = lead.company || lead.client || '—';
     const contact  = lead.contact ? `<div style="font-size:0.7rem;color:var(--text-muted);">${lead.contact}</div>` : '';
-    const editBtn  = canEdit ? `<button class="qa-btn" onclick="event.stopPropagation();openEditLeadModal('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;">✎ Edit</button>` : '';
-    const delBtn   = canEdit ? `<button class="qa-btn" onclick="event.stopPropagation();deleteLead('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;color:#b71c1c;border-color:#b71c1c;">✕</button>` : '';
-    return `<tr onclick="viewLead('${lead.id}')" style="cursor:pointer;" title="Click to view details">
-      <td style="font-family:var(--mono);font-weight:600;color:var(--red);font-size:0.75rem;">${lead.leadId || lead.id.slice(0,8).toUpperCase()}</td>
+    const editBtn  = (canEdit && !isReq) ? `<button class="qa-btn" onclick="event.stopPropagation();openEditLeadModal('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;">✎ Edit</button>` : '';
+    const delBtn   = (canEdit && !isReq) ? `<button class="qa-btn" onclick="event.stopPropagation();deleteLead('${lead.id}')" style="padding:4px 10px;font-size:0.7rem;color:#b71c1c;border-color:#b71c1c;">✕</button>` : '';
+    const rowClick = isReq ? `viewLeadRequest('${lead._reqId}')` : `viewLead('${lead.id}')`;
+    const idColor  = isReq ? sColor : 'var(--red)';
+    return `<tr onclick="${rowClick}" style="cursor:pointer;${isReq ? 'opacity:0.85;' : ''}" title="Click to view details">
+      <td style="font-family:var(--mono);font-weight:600;color:${idColor};font-size:0.75rem;">${lead.leadId || lead.id.slice(0,8).toUpperCase()}</td>
       <td><div style="font-weight:500;">${company}</div>${contact}</td>
       <td><span class="p-tag" style="margin:0;font-size:0.68rem;">${lead.source || '—'}</span></td>
       <td style="font-size:0.78rem;">${assigneeName}</td>
-      <td><span style="display:inline-block;padding:3px 8px;font-family:var(--mono);font-size:0.65rem;font-weight:700;letter-spacing:0.08em;border:1px solid ${sColor};color:${sColor};text-transform:uppercase;">${status}</span></td>
+      <td><span style="display:inline-block;padding:3px 8px;font-family:var(--mono);font-size:0.65rem;font-weight:700;letter-spacing:0.08em;border:1px solid ${sColor};color:${sColor};text-transform:uppercase;">${statusLabel}</span></td>
       <td><span style="font-family:var(--mono);font-size:0.68rem;font-weight:700;color:${pColor};text-transform:uppercase;">${priority}</span></td>
       <td style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">${createdStr}</td>
-      <td style="text-align:center;"><span id="lead-confirm-badge-${lead.id}" style="display:none;font-family:var(--mono);font-size:0.6rem;padding:2px 8px;color:#fff;background:#2e7d32;font-weight:700;">✔ DONE</span></td>
+      <td style="text-align:center;">${isReq ? '' : `<span id="lead-confirm-badge-${lead.id}" style="display:none;font-family:var(--mono);font-size:0.6rem;padding:2px 8px;color:#fff;background:#2e7d32;font-weight:700;">✔ DONE</span>`}</td>
       <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">${editBtn} ${delBtn}</td>
     </tr>`;
   }).join('');
@@ -20180,17 +20294,24 @@ function updateLeadsStats(list) {
 window.filterLeadsTable = function() {
   const q  = (document.getElementById('leads-search-input')?.value || '').toLowerCase().trim();
   const st = (document.getElementById('leads-filter-status')?.value || '').toLowerCase();
-  let filtered = LEADS_ACTIVE_CHUNK;
-  if (q) filtered = filtered.filter(l =>
+  const matchesSearch = l =>
+    !q ||
     (l.company||'').toLowerCase().includes(q) ||
     (l.contact||'').toLowerCase().includes(q) ||
     (l.email||'').toLowerCase().includes(q) ||
     (l.assigneeName||'').toLowerCase().includes(q) ||
-    (l.leadId||'').toLowerCase().includes(q)
-  );
-  if (st) filtered = filtered.filter(l => (l.status||'new') === st);
-  renderLeadsTable(filtered);
-  updateLeadsStats(filtered);
+    (l.leadId||'').toLowerCase().includes(q);
+
+  let filteredLeads = LEADS_ACTIVE_CHUNK.filter(matchesSearch);
+  if (st) filteredLeads = filteredLeads.filter(l => (l.status||'new') === st);
+
+  // The status dropdown only lists real lead statuses, so a status filter
+  // doesn't apply to pending/rejected request rows — just hide them while
+  // one's active; otherwise include them subject to the search box only.
+  const pseudoRows = st ? [] : buildLeadRequestPseudoRows().filter(matchesSearch);
+
+  renderLeadsTable([...pseudoRows, ...filteredLeads]);
+  updateLeadsStats(filteredLeads);
 };
 
 async function loadUsersForLeadAssignee() {
@@ -20211,11 +20332,43 @@ async function loadUsersForLeadAssignee() {
   } catch(e) { console.warn('Could not load users for lead assignee:', e); }
 }
 
-window.openNewLeadModal = function() {
+// Returns true if this user already has a lead request awaiting review —
+// used to block a second submission until the first is approved/rejected.
+async function hasPendingLeadRequest(uid) {
+  const fb = window._fb;
+  if (!fb || !uid) return false;
+  try {
+    const snap = await fb.getDocs(fb.query(
+      fb.collection(fb.db, 'leadRequests'),
+      fb.where('requestedByUid', '==', uid),
+      fb.where('status', '==', 'pending')
+    ));
+    return !snap.empty;
+  } catch (e) {
+    console.warn('Could not check for pending lead requests:', e);
+    return false; // fail open — don't block submission just because the check failed
+  }
+}
+
+window.openNewLeadModal = async function() {
+  // Any signed-in user can open this modal. Admin/super save directly;
+  // a plain user's submission goes into leadRequests for Super Admin approval
+  // (see saveLead()). Regular users are limited to one pending request at a
+  // time to avoid double submission.
   const role = window._currentRole || 'user';
-  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can create leads.'); return; }
+  const uid  = window._currentFirebaseUser?.uid;
+  if (role !== 'admin' && role !== 'super') {
+    const btn = document.getElementById('leads-new-btn');
+    if (btn) { btn.disabled = true; }
+    const pending = await hasPendingLeadRequest(uid);
+    if (btn) { btn.disabled = false; }
+    if (pending) {
+      showToast('⚠ You already have a lead request awaiting Super Admin approval. Please wait for it to be reviewed before submitting another.', 5000);
+      return;
+    }
+  }
   _leadEditId = null;
-  document.getElementById('lead-modal-title').textContent = 'New Lead';
+  document.getElementById('lead-modal-title').textContent = (role === 'admin' || role === 'super') ? 'New Lead' : 'Request New Lead';
   ['lead-company','lead-contact','lead-email','lead-phone','lead-notes','lead-source'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
@@ -20223,10 +20376,18 @@ window.openNewLeadModal = function() {
   document.getElementById('lead-priority').value = 'medium';
   const fuEl = document.getElementById('lead-followup'); if (fuEl) fuEl.value = '';
   const btn = document.getElementById('lead-save-btn');
-  if (btn) { btn.disabled = false; btn.textContent = 'Save Lead'; }
-  loadUsersForLeadAssignee();
+  if (btn) { btn.disabled = false; btn.textContent = (role === 'admin' || role === 'super') ? 'Save Lead' : 'Submit Request'; }
+  loadUsersForLeadAssignee().then(() => {
+    // Plain users can't reassign leads — default the assignee to themselves.
+    if (role !== 'admin' && role !== 'super') {
+      const sel = document.getElementById('lead-assignee');
+      const uid = window._currentFirebaseUser?.uid;
+      if (sel && uid) sel.value = uid;
+    }
+  });
   document.getElementById('modal-lead').classList.add('active');
 };
+
 
 window.openEditLeadModal = function(id) {
   const role = window._currentRole || 'user';
@@ -20258,7 +20419,9 @@ window.saveLead = async function() {
   const fb = window._fb;
   if (!fb) { showToast('Firebase not available.'); return; }
   const role = window._currentRole || 'user';
-  if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can save leads.'); return; }
+  // Editing an existing lead always requires admin/super (matches leads
+  // update rule — regular users never edit a lead directly).
+  if (_leadEditId && role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can edit leads.'); return; }
   const company = document.getElementById('lead-company')?.value.trim();
   if (!company) { showToast('⚠ Company / Client Name is required.'); return; }
   const assigneeSel  = document.getElementById('lead-assignee');
@@ -20267,7 +20430,8 @@ window.saveLead = async function() {
   const assigneeName  = selOpt?.dataset?.name  || selOpt?.text || '';
   const assigneeEmail = selOpt?.dataset?.email || '';
   const btn = document.getElementById('lead-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = _leadEditId ? 'Updating…' : 'Saving…'; }
+  const isDirect = (role === 'admin' || role === 'super');
+  if (btn) { btn.disabled = true; btn.textContent = _leadEditId ? 'Updating…' : (isDirect ? 'Saving…' : 'Submitting…'); }
   const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'Admin';
   const payload = {
     company, contact: document.getElementById('lead-contact')?.value.trim() || '',
@@ -20287,7 +20451,7 @@ window.saveLead = async function() {
       const idx = LEADS_ACTIVE_CHUNK.findIndex(l => l.id === _leadEditId);
       if (idx !== -1) Object.assign(LEADS_ACTIVE_CHUNK[idx], payload);
       showToast('Lead updated successfully.');
-    } else {
+    } else if (isDirect) {
       const now = new Date();
       const leadId = 'ld-' + String(leadIdCounter++).padStart(8, '0');
       payload.leadId = leadId; payload.createdAt = fb.serverTimestamp();
@@ -20295,14 +20459,41 @@ window.saveLead = async function() {
       const ref = await fb.addDoc(fb.collection(fb.db, 'leads'), payload);
       LEADS_ACTIVE_CHUNK.unshift({ id: ref.id, ...payload, createdAt: { toDate: () => now } });
       showToast('Lead created: ' + leadId);
+    } else {
+      // Plain user — file a request instead of writing to `leads` directly.
+      // A Super Admin must approve it (see approveLeadRequest below).
+      // Re-check for an existing pending request here too (not just in
+      // openNewLeadModal) as a last-line guard against double-clicks or a
+      // second tab submitting before this one refreshes.
+      const uid = window._currentFirebaseUser?.uid || '';
+      if (await hasPendingLeadRequest(uid)) {
+        showToast('⚠ You already have a lead request awaiting Super Admin approval.', 5000);
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit Request'; }
+        return;
+      }
+      delete payload.updatedAt; delete payload.updatedBy; // not meaningful until it becomes a real lead
+      await fb.addDoc(fb.collection(fb.db, 'leadRequests'), {
+        type: 'add',
+        leadData: payload,
+        requestedBy: actor,
+        requestedByUid: uid,
+        requestedAt: fb.serverTimestamp(),
+        status: 'pending'
+      });
+      showToast('Lead request submitted — awaiting Super Admin approval.');
     }
     closeLeadModal();
-    renderLeadsTable(LEADS_ACTIVE_CHUNK);
-    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    if (isDirect || _leadEditId) {
+      renderLeadsTable(buildLeadsDisplayList());
+      updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    } else {
+      // Refresh from Firestore so the new pending request shows up in the table.
+      await loadLeadsPage('init');
+    }
   } catch(err) {
     console.error('saveLead error:', err);
     showToast('⚠ Could not save lead: ' + (err.message || err));
-    if (btn) { btn.disabled = false; btn.textContent = _leadEditId ? 'Update Lead' : 'Save Lead'; }
+    if (btn) { btn.disabled = false; btn.textContent = _leadEditId ? 'Update Lead' : (isDirect ? 'Save Lead' : 'Submit Request'); }
   }
 };
 
@@ -20359,6 +20550,62 @@ window.viewLead = function(id) {
   if (lostBtn)    lostBtn.style.display    = (canEdit && status !== 'lost') ? '' : 'none';
   document.getElementById('modal-lead-view').classList.add('active');
   loadLeadConfirmation(id);
+};
+
+// Shows one of the current user's own pending/rejected lead requests —
+// reuses the lead detail modal but without the edit/convert/lost actions
+// or activity-confirmation strip, since it isn't a real lead yet.
+window.viewLeadRequest = function(reqId) {
+  const req = MY_LEAD_REQUESTS.find(r => r.id === reqId);
+  if (!req) return;
+  _leadViewId = null;
+  _leadReqViewId = reqId;
+  const d = req.leadData || {};
+  const isPending = req.status === 'pending';
+  const bannerColor = isPending ? '#f9a825' : '#b71c1c';
+  const bannerLabel = isPending ? 'PENDING APPROVAL' : 'REJECTED';
+  const reviewedAt = req.reviewedAt?.toDate ? req.reviewedAt.toDate() : null;
+  const fmtDate = dt => dt ? dt.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' }) : '—';
+  document.getElementById('lead-view-title').textContent = 'Lead Request — ' + (d.company || '—');
+  document.getElementById('lead-view-body').innerHTML = `
+    <div style="margin-bottom:14px;padding:10px 14px;background:${isPending ? 'rgba(249,168,37,0.1)' : 'rgba(183,28,28,0.1)'};border:1px solid ${bannerColor};display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <span style="font-family:var(--mono);font-size:0.72rem;font-weight:700;letter-spacing:0.08em;color:${bannerColor};">${bannerLabel}</span>
+      ${!isPending ? `<span style="font-size:0.78rem;color:var(--text-muted);">${req.reviewedBy ? 'Reviewed by ' + req.reviewedBy : ''}${reviewedAt ? ' · ' + fmtDate(reviewedAt) : ''}</span>` : ''}
+    </div>
+    ${(!isPending && req.rejectReason) ? `<div style="margin-bottom:14px;background:var(--bg3);border:1px solid var(--border2);padding:12px 14px;">
+      <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;">Reason For Rejection</div>
+      <div style="font-size:0.82rem;line-height:1.5;">${req.rejectReason}</div>
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--border2);">
+      ${[
+        ['Company / Client', d.company || '—'],
+        ['Contact Person',   d.contact || '—'],
+        ['Email',            d.email   || '—'],
+        ['Phone',            d.phone   || '—'],
+        ['Source',           d.source  || '—'],
+        ['Assigned To',      (d.assigneeName || '—') + (d.assigneeEmail ? '<br><span style="font-size:0.68rem;color:var(--text-muted);">' + d.assigneeEmail + '</span>' : '')],
+        ['Follow-Up Date',   d.followUpDate || '—'],
+        ['Requested By',     req.requestedBy || '—'],
+        ['Requested At',     fmtDate(req.requestedAt?.toDate ? req.requestedAt.toDate() : null)],
+      ].map(([lbl, val]) => `
+        <div style="padding:10px 14px;border-bottom:1px solid var(--border2);border-right:1px solid var(--border2);">
+          <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:3px;">${lbl}</div>
+          <div style="font-size:0.82rem;font-weight:500;">${val}</div>
+        </div>`).join('')}
+    </div>
+    ${d.notes ? `<div style="margin-top:12px;background:var(--bg3);border:1px solid var(--border2);padding:12px 14px;">
+      <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px;">Notes</div>
+      <div style="font-size:0.82rem;line-height:1.5;">${d.notes}</div>
+    </div>` : ''}`;
+  const strip     = document.getElementById('lead-confirm-strip');
+  const editBtn    = document.getElementById('lead-view-edit-btn');
+  const convertBtn = document.getElementById('lead-view-convert-btn');
+  const lostBtn    = document.getElementById('lead-view-lost-btn');
+  if (strip)      strip.style.display      = 'none';
+  if (editBtn)    editBtn.style.display    = 'none';
+  if (convertBtn) convertBtn.style.display = 'none';
+  if (lostBtn)    lostBtn.style.display    = 'none';
+  document.getElementById('modal-lead-view').classList.add('active');
 };
 
 window.editCurrentLead = function() { if (_leadViewId) openEditLeadModal(_leadViewId); };
@@ -20500,6 +20747,190 @@ window.closeLeadModal = function() {
 window.closeLeadViewModal = function() {
   document.getElementById('modal-lead-view').classList.remove('active');
   _leadViewId = null;
+  _leadReqViewId = null;
+};
+
+// ── LEAD REQUESTS — approval workflow ─────────────────────────────
+// A plain user can only REQUEST a new lead be added (via saveLead above).
+// Nothing lands in `leads` until a Super Admin reviews and approves it here.
+// Regular admins can see the queue (badge/count) but only Super can act on it —
+// mirrors the stockDeleteRequests / poVoidRequests pattern.
+
+function canReviewLeadRequest() {
+  return window._currentRole === 'super';
+}
+
+let _leadReqInProgress = new Set(); // reqIds currently being approved/rejected
+
+async function refreshLeadRequestBadge() {
+  const btn = document.getElementById('lead-requests-btn');
+  const badge = document.getElementById('lead-req-badge');
+  if (!btn || !badge) return;
+
+  const isSA = window._currentRole === 'super';
+  btn.style.display = isSA ? 'inline-flex' : 'none';
+  if (!isSA) return;
+
+  const fb = window._fb;
+  if (!fb) { badge.style.display = 'none'; return; }
+
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'leadRequests'), fb.where('status', '==', 'pending')));
+    if (snap.docs.length) {
+      badge.textContent = snap.docs.length;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (e) { console.warn('Could not load lead request count', e); }
+}
+
+window.openLeadRequestsModal = async function() {
+  if (!canReviewLeadRequest()) { showToast('Super Admin only.'); return; }
+  document.getElementById('modal-lead-requests').classList.add('active');
+  await loadLeadRequests();
+};
+window.closeLeadRequestsModal = function() {
+  document.getElementById('modal-lead-requests').classList.remove('active');
+};
+
+async function loadLeadRequests() {
+  const tbody = document.getElementById('lead-req-tbody');
+  const empty = document.getElementById('lead-req-empty');
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING…</td></tr>`;
+  empty.style.display = 'none';
+
+  const fb = window._fb;
+  if (!fb) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'leadRequests'), fb.where('status', '==', 'pending')));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderLeadRequestsTable(all);
+  } catch (e) {
+    console.error('Failed to load lead requests', e);
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:#ef5350;">FAILED TO LOAD REQUESTS</td></tr>`;
+  }
+}
+
+function renderLeadRequestsTable(requests) {
+  const tbody = document.getElementById('lead-req-tbody');
+  const empty = document.getElementById('lead-req-empty');
+
+  if (!requests.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = requests.map(r => {
+    const d = r.leadData || {};
+    const dateStr = r.requestedAt?.toDate ? r.requestedAt.toDate().toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    const typeLabel = r.type === 'delete' ? 'DELETE' : 'ADD';
+    const typeColor = r.type === 'delete' ? 'var(--red)' : '#2e7d32';
+    return `<tr style="border-bottom:1px solid var(--border);">
+      <td class="mono" style="padding:9px 14px;font-weight:700;color:${typeColor};">${typeLabel}</td>
+      <td style="padding:9px 14px;font-size:0.8rem;">${d.company || '—'}${d.contact ? '<br><span style="font-size:0.7rem;color:var(--text-muted);">' + d.contact + '</span>' : ''}</td>
+      <td style="padding:9px 14px;font-size:0.78rem;color:var(--text-muted);">${d.source || '—'}</td>
+      <td style="padding:9px 14px;font-size:0.78rem;">${r.requestedBy || '—'}</td>
+      <td class="mono" style="padding:9px 14px;font-size:0.7rem;color:var(--text-muted);">${dateStr}</td>
+      <td style="padding:9px 14px;text-align:center;white-space:nowrap;">
+        <button onclick="approveLeadRequest('${r.id}', this)"
+          style="background:rgba(147,51,234,0.12);border:1px solid rgba(147,51,234,0.35);color:#9333ea;padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);margin-right:4px;">APPROVE</button>
+        <button onclick="rejectLeadRequest('${r.id}', this)"
+          style="background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);">REJECT</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// Approves a pending "add" request: actually creates the lead, then marks
+// the request approved. (Delete-type requests aren't wired up in the UI
+// yet — only add requests are currently produced by saveLead().)
+window.approveLeadRequest = async function(reqId, btn) {
+  if (!canReviewLeadRequest()) { showToast('Super Admin only.'); return; }
+  if (_leadReqInProgress.has(reqId)) { showToast('Already processing — please wait.'); return; }
+  const fb = window._fb;
+  if (!fb) return;
+  _leadReqInProgress.add(reqId);
+  if (btn) btn.disabled = true;
+  try {
+    const snap = await fb.getDoc(fb.doc(fb.db, 'leadRequests', reqId));
+    if (!snap.exists()) { showToast('⚠ Request no longer exists.'); loadLeadRequests(); return; }
+    const req = { id: reqId, ...snap.data() };
+    if (req.status !== 'pending') { showToast('This request has already been reviewed.'); loadLeadRequests(); return; }
+
+    const reviewerName = window._currentFirebaseUser ? (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email.split('@')[0]) : (document.getElementById('tb-user')?.textContent || 'Super Admin');
+
+    if (req.type === 'delete' && req.leadId) {
+      await fb.deleteDoc(fb.doc(fb.db, 'leads', req.leadId));
+    } else {
+      const leadId = 'ld-' + String(leadIdCounter++).padStart(8, '0');
+      const payload = {
+        ...(req.leadData || {}),
+        leadId,
+        createdAt: fb.serverTimestamp(),
+        createdBy: req.requestedBy || 'User',
+        createdByUid: req.requestedByUid || '',
+        updatedAt: fb.serverTimestamp(),
+        updatedBy: reviewerName
+      };
+      await fb.addDoc(fb.collection(fb.db, 'leads'), payload);
+    }
+
+    await fb.updateDoc(fb.doc(fb.db, 'leadRequests', reqId), {
+      status: 'approved',
+      reviewedBy: reviewerName,
+      reviewedAt: fb.serverTimestamp()
+    });
+
+    showToast('Lead request approved.');
+    loadLeadRequests();
+    refreshLeadRequestBadge();
+    loadLeadsPage('init');
+  } catch (e) {
+    console.error('Failed to approve lead request', e);
+    showToast('⚠ Could not approve request: ' + (e.message || e.code || e));
+  } finally {
+    _leadReqInProgress.delete(reqId);
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.rejectLeadRequest = async function(reqId, btn) {
+  if (!canReviewLeadRequest()) { showToast('Super Admin only.'); return; }
+  if (_leadReqInProgress.has(reqId)) { showToast('Already processing — please wait.'); return; }
+  const fb = window._fb;
+  if (!fb) return;
+  _leadReqInProgress.add(reqId);
+  if (btn) btn.disabled = true;
+  try {
+    const snap = await fb.getDoc(fb.doc(fb.db, 'leadRequests', reqId));
+    if (!snap.exists()) { showToast('⚠ Request no longer exists.'); loadLeadRequests(); return; }
+    const req = { id: reqId, ...snap.data() };
+    if (req.status !== 'pending') { showToast('This request has already been reviewed.'); loadLeadRequests(); return; }
+
+    const reason = window.prompt('Reason for rejecting this lead request (optional):') || '';
+    const reviewerName = window._currentFirebaseUser ? (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email.split('@')[0]) : (document.getElementById('tb-user')?.textContent || 'Super Admin');
+
+    await fb.updateDoc(fb.doc(fb.db, 'leadRequests', reqId), {
+      status: 'rejected',
+      rejectReason: reason,
+      reviewedBy: reviewerName,
+      reviewedAt: fb.serverTimestamp()
+    });
+
+    showToast('Lead request rejected.');
+    loadLeadRequests();
+    refreshLeadRequestBadge();
+  } catch (e) {
+    console.error('Failed to reject lead request', e);
+    showToast('⚠ Could not reject request: ' + (e.message || e.code || e));
+  } finally {
+    _leadReqInProgress.delete(reqId);
+    if (btn) btn.disabled = false;
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════
