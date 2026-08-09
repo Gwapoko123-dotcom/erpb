@@ -23869,6 +23869,29 @@ window.excelImportSelected = function() {
 let ALL_LEAVES = [];   // Super Admin cache (all employees)
 let MY_LEAVES  = [];   // Current user's leaves
 let LEAVE_FOR_STAFF_MODE = false; // true when Admin/Super Admin is filing on behalf of a staff member
+let LEAVE_USER_NAMES = {}; // uid -> full name, cached from the users collection so we can
+                            // show a person's real name instead of their email/username
+
+// ── Fetch full names for all users so the leave tables/detail views ──
+// can display each applicant's real name, even for older records that were
+// saved with just their email-derived username.
+async function _loadLeaveUserNames(){
+  const fb = window._fb;
+  if(!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    snap.docs.forEach(d => {
+      const u = d.data();
+      const name = u.fullName || u.displayName || '';
+      if(name) LEAVE_USER_NAMES[d.id] = name;
+    });
+  } catch(e){ console.warn('Could not load user names for leave requests:', e); }
+}
+
+// ── Preferred display name for a leave request's applicant ──
+function leaveApplicantName(l){
+  return (l && l.uid && LEAVE_USER_NAMES[l.uid]) || (l && l.applicantName) || '—';
+}
 
 // ── Leave balance configuration ─────────────────────────────────
 // Only 3 independent credit pools exist:
@@ -24066,6 +24089,7 @@ async function loadLeavesFromFirestore() {
   } catch(e) {
     console.error('Leave load error:', e);
   }
+  await _loadLeaveUserNames();
 }
 
 // ── Render my leave table ───────────────────────────────────────
@@ -24116,7 +24140,7 @@ function renderLeaveAdminTable() {
   const filtered = ALL_LEAVES.filter(l => {
     const matchS = !stf || l.status === stf;
     const matchT = !ttf || (ttf === 'Custom' ? !STANDARD_LEAVE_TYPES.includes(l.leaveType) : l.leaveType === ttf);
-    const matchQ = !search || (l.applicantName||'').toLowerCase().includes(search) || (l.refNo||'').toLowerCase().includes(search);
+    const matchQ = !search || leaveApplicantName(l).toLowerCase().includes(search) || (l.refNo||'').toLowerCase().includes(search);
     return matchS && matchT && matchQ;
   });
 
@@ -24139,7 +24163,7 @@ function renderLeaveAdminTable() {
     return `<tr>
       <td style="font-family:var(--mono);font-size:0.7rem;color:var(--red);">${l.refNo||'—'}</td>
       <td>${filed}</td>
-      <td style="font-weight:600;">${l.applicantName||'—'}${l.filedByAdmin ? `<div style="font-size:0.6rem;font-weight:400;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.04em;text-transform:uppercase;margin-top:2px;">filed by ${l.filedByName||'admin'}</div>` : ''}</td>
+      <td style="font-weight:600;">${leaveApplicantName(l)}${l.filedByAdmin ? `<div style="font-size:0.6rem;font-weight:400;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.04em;text-transform:uppercase;margin-top:2px;">filed by ${l.filedByName||'admin'}</div>` : ''}</td>
       <td>${l.leaveType||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${l.dateFrom||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${l.dateTo||'—'}</td>
@@ -24940,7 +24964,7 @@ function _renderLeaveDetailModal(l, canReview) {
 
   document.getElementById('leave-detail-body').innerHTML = `
     <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${l.refNo||'—'}</span></div>
-    <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${l.applicantName||'—'}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${leaveApplicantName(l)}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Email</span><span class="ldr-val">${l.applicantEmail||'—'}</span></div>
     ${l.filedByAdmin ? `<div class="leave-detail-row"><span class="ldr-label">Filed By</span><span class="ldr-val">${l.filedByName||'—'} (on behalf of staff)</span></div>` : ''}
     <div class="leave-detail-row"><span class="ldr-label">Leave Type</span><span class="ldr-val">${l.leaveType||'—'}</span></div>
@@ -25096,6 +25120,29 @@ window.cancelLeave = async function(id) {
 
 let ALL_OT = [];
 let MY_OT  = [];
+let OT_USER_NAMES = {}; // uid -> full name, cached from the users collection so we can
+                         // show a person's real name instead of their email/username
+
+// ── Fetch full names for all users so the OT tables/detail views ──
+// can display each applicant's real name, even for older records that were
+// saved with just their email-derived username.
+async function _loadOTUserNames(){
+  const fb = window._fb;
+  if(!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    snap.docs.forEach(d => {
+      const u = d.data();
+      const name = u.fullName || u.displayName || '';
+      if(name) OT_USER_NAMES[d.id] = name;
+    });
+  } catch(e){ console.warn('Could not load user names for OT requests:', e); }
+}
+
+// ── Preferred display name for an OT request's applicant ──
+function otApplicantName(o){
+  return (o && o.uid && OT_USER_NAMES[o.uid]) || (o && o.applicantName) || '—';
+}
 
 window.loadOTPage = async function() {
   await loadOTFromFirestore();
@@ -25126,6 +25173,7 @@ async function loadOTFromFirestore() {
     }
     updateOTNavBadge();
   } catch(e) { console.error('OT load error:', e); }
+  await _loadOTUserNames();
 }
 
 function renderMyOTTable() {
@@ -25170,7 +25218,7 @@ function renderOTAdminTable() {
   if (!tbody) return;
   const filtered = ALL_OT.filter(o => {
     const matchS = !stf || o.status === stf;
-    const matchQ = !search || (o.applicantName||'').toLowerCase().includes(search) || (o.refNo||'').toLowerCase().includes(search);
+    const matchQ = !search || otApplicantName(o).toLowerCase().includes(search) || (o.refNo||'').toLowerCase().includes(search);
     return matchS && matchQ;
   });
   const pending = ALL_OT.filter(o => o.status === 'pending').length;
@@ -25190,7 +25238,7 @@ function renderOTAdminTable() {
     return `<tr style="${rowStyle}">
       <td style="font-family:var(--mono);font-size:0.7rem;color:var(--red);">${o.refNo||'—'}</td>
       <td>${filed}</td>
-      <td style="font-weight:600;">${o.applicantName||'—'}</td>
+      <td style="font-weight:600;">${otApplicantName(o)}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${o.otDate||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${o.timeFrom||'—'}</td>
       <td style="font-family:var(--mono);font-size:0.75rem;">${o.timeTo||'—'}</td>
@@ -25368,7 +25416,7 @@ function _renderOTDetailModal(o, canReview) {
     : null;
   document.getElementById('ot-detail-body').innerHTML = `
     <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${o.refNo||'—'}</span></div>
-    <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${o.applicantName||'—'}</span></div>
+    <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${otApplicantName(o)}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Email</span><span class="ldr-val">${o.applicantEmail||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">OT Date</span><span class="ldr-val" style="font-family:var(--mono);">${o.otDate||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Time Window</span><span class="ldr-val" style="font-family:var(--mono);">${o.timeFrom||'—'} → ${o.timeTo||'—'}</span></div>
