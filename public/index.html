@@ -239,6 +239,11 @@ window.SALES_ACTIVE_CHUNK = [];
           voidedAt: data.voidedAt ? data.voidedAt.toDate() : null,
           voidedBy: data.voidedBy || '',
           voidReason: data.voidReason || '',
+          // Recomputed live from the item lines (not the stale hasIncomplete flag
+          // captured at sale time) so this flips off as soon as every line has
+          // been Completed from the Incomplete Items module or from here.
+          hasIncomplete: Array.isArray(data.items) && data.items.some(it => it && it.incomplete),
+          incompleteCount: Array.isArray(data.items) ? data.items.filter(it => it && it.incomplete).length : 0,
           raw: data // full original sale payload — needed to rebuild/reprint the receipt later
         };
       });
@@ -299,6 +304,15 @@ window.SALES_ACTIVE_CHUNK = [];
         : '';
       if (!isVoided && balance > 0) {
         statusCell += ` <button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;color:#2e7d32;border-color:#2e7d32;margin-left:4px;" onclick="event.stopPropagation(); addSalePayment('${tx.firestoreId}')">+ Payment</button>`;
+      }
+      // Sale has one or more lines still marked Incomplete (no serial / stock
+      // deduction yet) — surface it right here, beside the Void/Payment status,
+      // with a count and a quick Edit/Complete jump straight into that item's
+      // serial picker, same as the Incomplete Items page.
+      if (!isVoided && tx.hasIncomplete) {
+        const cnt = tx.incompleteCount || 1;
+        statusCell += ` <span style="background:#fef3c7;color:#b45309;padding:2px 8px;font-size:0.6rem;font-family:var(--mono);letter-spacing:.06em;border-radius:2px;margin-left:4px;white-space:nowrap;">⚠ ${cnt} INCOMPLETE ${cnt===1?'ITEM':'ITEMS'}</span>`;
+        statusCell += ` <button class="qa-btn" style="padding:3px 10px;font-size:0.62rem;color:var(--green);border-color:rgba(22,163,74,0.5);margin-left:4px;" onclick="event.stopPropagation(); openSaleIncompleteItems('${tx.firestoreId}')">Edit / Complete</button>`;
       }
 
       return `
@@ -1998,6 +2012,10 @@ body.app-running #screen-app   { display:flex !important; }
         <div class="nav-section">Sales</div>
         <div class="nav-item" onclick="showPage('sales',this)">
           Sales
+        </div>
+        <div class="nav-item" id="nav-incomplete" onclick="showPage('incomplete',this)">
+          Incomplete Items
+          <span class="badge" id="badge-incomplete-nav" style="display:none">0</span>
         </div>
         <div class="nav-item" onclick="showPage('quotation',this)">
           Quotation
@@ -4259,6 +4277,75 @@ body.app-running #screen-app   { display:flex !important; }
           <div id="lcs-msg" style="margin-top:8px;"></div>
         </div>
 
+        <!-- Super Admin: Per-Employee Leave Credit Overrides -->
+        <div class="panel" id="employee-leave-credit-panel" style="display:none;margin-bottom:14px;">
+          <div class="panel-title" style="margin-bottom:10px;">Employee Leave Credit Overrides</div>
+          <div style="font-family:var(--sans);font-size:0.78rem;color:var(--text-muted);margin-bottom:14px;">
+            Give one specific employee a different number of leave days than the company-wide defaults above. Leave any field blank to have that pool fall back to the default for that employee.
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+            <div style="flex:1;min-width:220px;">
+              <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Employee</label>
+              <select id="elc-employee-select" style="width:100%;" onchange="loadEmployeeLeaveCredits()">
+                <option value="">— Select an employee —</option>
+              </select>
+            </div>
+            <div id="elc-override-badge" style="display:none;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;color:var(--red);border:1px solid rgba(239,83,80,0.35);padding:6px 10px;text-transform:uppercase;white-space:nowrap;">Has custom overrides</div>
+          </div>
+
+          <div id="elc-fields-wrap" style="display:none;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Vacation Leave (days/yr)</label>
+                <input type="number" id="elc-vacation" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Sick Leave (days/yr)</label>
+                <input type="number" id="elc-sick" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Shared Pool Total (days/yr)</label>
+                <input type="number" id="elc-special" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+            </div>
+            <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Days consumed per approved request — Maternity / Paternity / Bereavement / Emergency</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Maternity Leave</label>
+                <input type="number" id="elc-maternity" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Paternity Leave</label>
+                <input type="number" id="elc-paternity" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Bereavement Leave</label>
+                <input type="number" id="elc-bereavement" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+              <div>
+                <label style="display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;">Emergency Leave</label>
+                <input type="number" id="elc-emergency" min="0" step="0.5" style="width:100%;" placeholder="Default"/>
+              </div>
+            </div>
+            <button class="btn btn-red" id="elc-save-btn" onclick="saveEmployeeLeaveCredits()" style="width:200px;">Save Override</button>
+            <button id="elc-reset-btn" onclick="resetEmployeeLeaveCredits()" style="margin-left:8px;background:transparent;border:1px solid rgba(239,83,80,0.35);color:#ef5350;padding:9px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">Reset to Default</button>
+            <div id="elc-msg" style="margin-top:8px;"></div>
+          </div>
+
+          <div id="elc-overrides-list-wrap" style="margin-top:18px;">
+            <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.1em;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Employees currently on a custom override</div>
+            <div style="overflow-x:auto;border:1px solid var(--border2);">
+              <table style="width:100%;border-collapse:collapse;font-size:0.8rem;" class="leave-table">
+                <thead><tr>
+                  <th>Employee</th><th>Vacation</th><th>Sick</th><th>Shared Pool</th><th>Maternity</th><th>Paternity</th><th>Bereavement</th><th>Emergency</th><th style="text-align:center;">Actions</th>
+                </tr></thead>
+                <tbody id="elc-overrides-tbody"></tbody>
+              </table>
+            </div>
+            <div id="elc-overrides-empty" style="display:none;text-align:center;padding:20px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border:1px solid var(--border2);border-top:none;background:var(--card);">◇<br><br>NO CUSTOM OVERRIDES SET — EVERYONE USES THE DEFAULTS</div>
+          </div>
+        </div>
+
         <!-- Super Admin: All Leave Requests -->
         <div class="panel" id="leave-admin-panel" style="display:none;">
           <div class="panel-title" style="margin-bottom:14px;">All Leave Requests
@@ -4631,6 +4718,45 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
       </div>
 
+      <!-- ══════════════ INCOMPLETE ITEMS PAGE ══════════════ -->
+      <div id="page-incomplete" class="page">
+        <div class="page-heading">INCOMPLETE <span>ITEMS</span></div>
+        <div style="font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);margin:-8px 0 16px;line-height:1.6;">
+          Items sold without a serial number selected at the time of sale. No inventory has been deducted for these yet — use "Complete" once the serial number (or stock) is confirmed.
+        </div>
+
+        <div class="po-filter-bar">
+          <input type="text" id="incomplete-search" placeholder="Search by product, customer, or slip no…"
+            style="flex:1;min-width:180px;" oninput="renderIncompleteItemsTable()"/>
+          <select id="incomplete-status-filter" onchange="renderIncompleteItemsTable()">
+            <option value="pending">Pending Only</option>
+            <option value="all">All (Pending + Completed)</option>
+            <option value="completed">Completed Only</option>
+          </select>
+          <button class="qa-btn" id="incomplete-repair-btn" style="padding:8px 14px;font-size:0.68rem;white-space:nowrap;" onclick="repairAllMissingIncompleteItemRecords()" title="Scans recent sales for lines marked Incomplete that never got a tracking record here (e.g. from a past permissions issue) and recreates them.">🔧 Repair Missing Records</button>
+        </div>
+
+        <div style="overflow-x:auto;border:1px solid var(--border2);background:var(--card);">
+          <table class="po-table">
+            <thead><tr>
+              <th>Slip No.</th>
+              <th>Customer</th>
+              <th>Branch</th>
+              <th>Product</th>
+              <th>Model</th>
+              <th style="text-align:center;">Qty</th>
+              <th>Sold By</th>
+              <th style="text-align:center;">Status</th>
+              <th style="text-align:center;">Manage</th>
+            </tr></thead>
+            <tbody id="incomplete-tbody"></tbody>
+          </table>
+        </div>
+        <div id="incomplete-empty" style="display:none;text-align:center;padding:40px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border:1px solid var(--border2);background:var(--card);border-top:none;">
+          ◇<br><br>NO INCOMPLETE ITEMS FOUND
+        </div>
+      </div>
+
     </main>
   </div>
 </div>
@@ -4684,6 +4810,30 @@ body.app-running #screen-app   { display:flex !important; }
     <div style="display:flex;gap:10px;margin-top:18px;">
       <button id="rma-submit-btn" onclick="submitRMAItem()" class="btn btn-red" style="flex:1;">Save RMA Item</button>
       <button onclick="closeRMAModal()" class="btn btn-ghost" style="width:120px;margin:0;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ INCOMPLETE ITEM — COMPLETE (SERIAL PICKER) MODAL ══════════════ -->
+<div id="modal-ii-serial" class="modal-overlay" style="z-index:10050;" onclick="if(event.target===this)closeIICompletePicker()">
+  <div class="modal-card" style="max-width:520px;">
+    <div class="modal-title">
+      🏷 &nbsp;Complete Item — Select Serial Number(s)
+      <button class="modal-close" onclick="closeIICompletePicker()">✕</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);margin-bottom:10px;letter-spacing:0.04em;" id="ii-subtitle"></div>
+
+    <input type="text" id="ii-search" placeholder="Search serial number…"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.84rem;outline:none;margin-bottom:10px;"
+      oninput="renderIICompletePickerBody()"/>
+
+    <div id="ii-count" style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.06em;text-transform:uppercase;"></div>
+
+    <div id="ii-list" style="max-height:320px;overflow-y:auto;border:1px solid var(--border2);"></div>
+
+    <div style="display:flex;gap:10px;margin-top:14px;">
+      <button class="btn btn-red" onclick="confirmIICompletePicker()" style="flex:1;">Complete Item</button>
+      <button class="btn btn-ghost" onclick="closeIICompletePicker()" style="width:140px;margin:0;">Cancel</button>
     </div>
   </div>
 </div>
@@ -4910,6 +5060,10 @@ body.app-running #screen-app   { display:flex !important; }
         </span>
       </div>
       <div class="receipt-box" id="receipt-body"></div>
+      <!-- Edit/Complete panel for any lines just saved as Incomplete — lets the
+           cashier resolve them (pick serial / confirm stock) right away
+           without leaving the Sales page. Hidden when the sale is fully complete. -->
+      <div id="receipt-incomplete-panel" style="display:none;max-width:680px;margin:14px auto 0;"></div>
       <div style="display:flex;gap:10px;margin-top:16px;justify-content:center;">
         <button class="btn btn-red" onclick="printReceipt()" style="width:180px;">Print Receipt</button>
         <button class="btn btn-ghost" onclick="newSale()" style="width:180px;margin:0;">New Transaction</button>
@@ -6859,14 +7013,32 @@ function renderSalesLines(){
     const prod = PRICELIST.find(p=>p.id===item.prodId);
     const prodLabel = prod ? (prod.name + (prod.model ? ' [' + prod.model + ']' : '')) : '';
     let serialCell = `<span style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);opacity:0.45;">— N/A —</span>`;
-    if(prod && prod.hasSerials){
-      const picked = (item.serials||[]).length;
-      const need   = item.qty;
-      const ok     = picked === need;
-      serialCell = `<button onclick="openLineSerialPicker(${i})" title="Click to select item serial number(s)"
-        style="width:100%;background:var(--bg3);border:1px solid ${ok?'var(--green)':'var(--red-border)'};color:${ok?'var(--green)':'var(--red)'};padding:6px 8px;cursor:pointer;font-family:var(--mono);font-size:0.68rem;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-        ${picked>0 ? '🏷 '+picked+'/'+need+' SET' : '+ SELECT ('+need+')'}
-      </button>`;
+    if(prod){
+      const incompleteToggle = `<label style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:0.58rem;letter-spacing:0.02em;color:var(--text-muted);cursor:pointer;margin-top:4px;white-space:nowrap;">
+        <input type="checkbox" ${item.incomplete?'checked':''} onchange="toggleSalesLineIncomplete(${i}, this.checked)" style="width:12px;height:12px;cursor:pointer;"/> Mark Incomplete
+      </label>`;
+      if(item.incomplete){
+        serialCell = `<div style="display:flex;flex-direction:column;align-items:center;">
+          <span title="This item will be saved without deducting inventory. Complete it later from the Incomplete Items module." style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.04em;color:#d97706;background:rgba(217,119,6,0.1);border:1px solid #d97706;padding:4px 8px;white-space:nowrap;">⚠ INCOMPLETE</span>
+          ${incompleteToggle}
+        </div>`;
+      } else if(prod.hasSerials){
+        const picked = (item.serials||[]).length;
+        const need   = item.qty;
+        const ok     = picked === need;
+        serialCell = `<div style="display:flex;flex-direction:column;align-items:center;">
+          <button onclick="openLineSerialPicker(${i})" title="Click to select item serial number(s)"
+            style="width:100%;background:var(--bg3);border:1px solid ${ok?'var(--green)':'var(--red-border)'};color:${ok?'var(--green)':'var(--red)'};padding:6px 8px;cursor:pointer;font-family:var(--mono);font-size:0.68rem;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${picked>0 ? '🏷 '+picked+'/'+need+' SET' : '+ SELECT ('+need+')'}
+          </button>
+          ${incompleteToggle}
+        </div>`;
+      } else {
+        serialCell = `<div style="display:flex;flex-direction:column;align-items:center;">
+          <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);opacity:0.45;">— N/A —</span>
+          ${incompleteToggle}
+        </div>`;
+      }
     }
     return `<tr>
       <td style="position:relative;">
@@ -6905,6 +7077,19 @@ function onSalesQtyChange(idx, val){
   if(salesItems[idx].serials && salesItems[idx].serials.length > q){
     salesItems[idx].serials = salesItems[idx].serials.slice(0, q);
   }
+  renderSalesLines();
+  updateSalesTotals();
+}
+
+// Marking a line "Incomplete" lets it be saved without a serial number chosen
+// (or, for non-serialized products, without deducting stock yet). No
+// inventory is touched for this line at all until it's later resolved from
+// the Incomplete Items module. Clears any previously-chosen serials so a
+// stale pick can't ride along on an incomplete line.
+function toggleSalesLineIncomplete(idx, checked){
+  if(!salesItems[idx]) return;
+  salesItems[idx].incomplete = checked;
+  if(checked) salesItems[idx].serials = [];
   renderSalesLines();
   updateSalesTotals();
 }
@@ -7167,7 +7352,7 @@ async function submitSale(){
   if(invalidService){ showToast('Please enter a name for every service line.'); return; }
   const serialMismatch = salesItems.find(it=>{
     const prod = PRICELIST.find(p=>p.id===it.prodId);
-    return prod && prod.hasSerials && (it.serials||[]).length !== it.qty;
+    return prod && prod.hasSerials && !it.incomplete && (it.serials||[]).length !== it.qty;
   });
   if(serialMismatch){
     const prod = PRICELIST.find(p=>p.id===serialMismatch.prodId);
@@ -7197,9 +7382,11 @@ async function submitSale(){
     showToast(`⚠ Could not reach the shared sales counter (${_lastSalesSeqError}) — this sale number may not be unique. Ask your developer to add a Firestore rule allowing read/write on counters/salesTransactions.`, 9000);
   }
 
+  const hasIncomplete = salesItems.some(it => it.incomplete);
+
   const tx = {
     id: txId, customer, address, contactPerson, tin, contact, branch, notes, discPct, subtotal, headerDisc, vat, total, vatApplied: applyVat,
-    paymentMethod, amountPaid, change: Math.max(0, amountPaid - total),
+    paymentMethod, amountPaid, change: Math.max(0, amountPaid - total), hasIncomplete,
     date: now.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}),
     time: now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}),
     slipNo: 'SLP-' + String(saleSeq).padStart(7,'0'),
@@ -7222,19 +7409,47 @@ async function submitSale(){
   // Save to Firestore
   const fb = window._fb;
   if (fb) {
-    fb.addDoc(fb.collection(fb.db, 'sales'), {
-      ...tx,
-      uid: window._currentFirebaseUser?.uid || '',
-      createdAt: fb.serverTimestamp()
-    }).catch(e => console.warn('Could not save sale to Firestore:', e));
+    try {
+      const saleRef = await fb.addDoc(fb.collection(fb.db, 'sales'), {
+        ...tx,
+        uid: window._currentFirebaseUser?.uid || '',
+        createdAt: fb.serverTimestamp()
+      });
+      tx.firestoreId = saleRef.id;
+      window._lastSubmittedSaleFirestoreId = saleRef.id;
+    } catch(e) {
+      console.warn('Could not save sale to Firestore:', e);
+    }
   }
 
   // Update dashboard activity and totals
   refreshDashActivity(tx);
   updateDashSalesTotals();
 
-  // Mark any chosen serials as SOLD against this customer
+  // Mark any chosen serials as SOLD against this customer (lines marked
+  // Incomplete are skipped here — no inventory is touched for them yet)
   markSoldSerialsForSale(tx);
+
+  // Log any Incomplete lines into the Incomplete Items module, then surface
+  // an immediate Edit/Complete panel right on this just-printed receipt so
+  // the cashier can resolve them (pick a serial / confirm stock) without
+  // hunting for the sale again in the Sales Log or Incomplete Items page.
+  if(hasIncomplete){
+    const createdIncompleteItems = await recordIncompleteItemsForSale(tx);
+    const panel = document.getElementById('receipt-incomplete-panel');
+    if(panel){
+      if(createdIncompleteItems.length){
+        panel.style.display = 'block';
+        panel.innerHTML = buildIncompleteItemsPanelHTML(createdIncompleteItems);
+      } else {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+      }
+    }
+  } else {
+    const panel = document.getElementById('receipt-incomplete-panel');
+    if(panel){ panel.style.display = 'none'; panel.innerHTML = ''; }
+  }
 }
 
 // ── Marks the serial numbers chosen on a completed sale as "sold" ──
@@ -7247,6 +7462,10 @@ async function submitSale(){
 async function markSoldSerialsForSale(tx){
   const fb = window._fb;
   for(const it of (tx.items||[])){
+    // Incomplete lines have no serial chosen and must NOT deduct inventory —
+    // they're tracked instead in the Incomplete Items module and resolved later.
+    if(it.incomplete) continue;
+
     const prod = PRICELIST.find(p=>p.id===it.prodId);
     if(!prod) continue;
 
@@ -7944,9 +8163,12 @@ function renderReceipt(tx, targetId){
     const serialNote = (it.serials && it.serials.length)
       ? `<div style="font-size:0.65rem;color:#777;margin-top:1px;">S/N: ${it.serials.map(s=>s.serial).join(', ')}</div>`
       : '';
+    const incompleteNote = it.incomplete
+      ? `<div style="font-size:0.65rem;color:#b45309;font-weight:700;margin-top:1px;">⚠ INCOMPLETE — serial number pending, not yet deducted from inventory</div>`
+      : '';
     return `<tr>
       <td style="padding:4px 6px;border:1px solid #ccc;text-align:center;font-size:0.8rem;">${i+1}</td>
-      <td style="padding:4px 6px;border:1px solid #ccc;font-size:0.8rem;">${it.disc>0?'<span style="font-size:0.72rem;color:#555;">['+it.disc+'% disc] </span>':''}${it.prodName}${model ? ` <span style="color:#555;">[${model}]</span>` : ''}${serialNote}</td>
+      <td style="padding:4px 6px;border:1px solid #ccc;font-size:0.8rem;">${it.disc>0?'<span style="font-size:0.72rem;color:#555;">['+it.disc+'% disc] </span>':''}${it.prodName}${model ? ` <span style="color:#555;">[${model}]</span>` : ''}${serialNote}${incompleteNote}</td>
       <td style="padding:4px 6px;border:1px solid #ccc;text-align:center;font-size:0.8rem;">${it.unit||'pc'}</td>
       <td style="padding:4px 6px;border:1px solid #ccc;text-align:right;font-size:0.8rem;">${fmt(it.unitPrice)}</td>
       <td style="padding:4px 6px;border:1px solid #ccc;text-align:center;font-size:0.8rem;">${it.qty}</td>
@@ -7962,10 +8184,16 @@ function renderReceipt(tx, targetId){
     <div style="text-align:center;background:#fdecea;border:2px solid #c62828;color:#c62828;font-weight:700;letter-spacing:0.12em;padding:8px;margin-bottom:10px;font-size:0.85rem;text-transform:uppercase;">
       ⛔ Voided Transaction${tx.voidedBy ? ' — voided by ' + tx.voidedBy : ''}${tx.voidReason ? ' (' + tx.voidReason + ')' : ''}
     </div>` : '';
+  const hasIncompleteLines = tx.hasIncomplete || (tx.items||[]).some(it=>it.incomplete);
+  const incompleteBanner = hasIncompleteLines ? `
+    <div style="text-align:center;background:#fef3c7;border:2px solid #b45309;color:#b45309;font-weight:700;letter-spacing:0.1em;padding:8px;margin-bottom:10px;font-size:0.8rem;text-transform:uppercase;">
+      ⚠ Incomplete Sale — one or more items pending serial number / inventory deduction
+    </div>` : '';
 
   document.getElementById(targetId).innerHTML = `
     <div style="font-family:'Inter',sans-serif;max-width:680px;margin:0 auto;color:#111;font-size:0.82rem;border:1px solid #ddd;padding:24px 28px;background:#fff;">
       ${voidedBanner}
+      ${incompleteBanner}
       <!-- Letterhead — same layout as the printed Purchase Order -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:8px;">
         <div>
@@ -8102,6 +8330,7 @@ function newSale(){
   const changeRow = document.getElementById('sale-change-row'); if(changeRow) changeRow.style.display = 'none';
   document.getElementById('sales-receipt-wrap').style.display = 'none';
   document.getElementById('sales-form-wrap').style.display    = 'block';
+  const incPanel = document.getElementById('receipt-incomplete-panel'); if(incPanel){ incPanel.style.display='none'; incPanel.innerHTML=''; }
   renderSalesLines();
   updateSalesTotals();
 }
@@ -8165,7 +8394,211 @@ window.viewPastSaleReceipt = function(firestoreId){
   if (payBtn) payBtn.style.display = (!tx.voided && balance > 0) ? '' : 'none';
 
   document.getElementById('modal-view-receipt').classList.add('active');
+
+  loadAndRenderSaleIncompleteItems(firestoreId, receiptTx);
 };
+
+// ── "Edit / Complete" entry point from the Sales Log table row itself — jumps ──
+// straight to the transaction's receipt view, which surfaces the same
+// Edit/Complete panel (see loadAndRenderSaleIncompleteItems below).
+window.openSaleIncompleteItems = function(firestoreId){
+  viewPastSaleReceipt(firestoreId);
+};
+
+// ── Shared markup for the "pending incomplete items on this sale" panel. ──
+// Used by the just-submitted receipt view (submitSale), the past-sale
+// reprint view (loadAndRenderSaleIncompleteItems), and the Incomplete Items
+// page could reuse it too. Every button routes through
+// openCompleteIncompleteItem() — the single place that actually performs
+// the serial pick / inventory deduction / status change.
+function buildIncompleteItemsPanelHTML(items){
+  if(!items || !items.length) return '';
+  return `
+    <div style="background:#fef3c7;border:2px solid #b45309;padding:12px 16px;">
+      <div style="font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;color:#b45309;font-weight:700;margin-bottom:8px;text-transform:uppercase;">⚠ Edit / Complete Incomplete Items</div>
+      ${items.map(it=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid rgba(180,83,9,0.25);">
+          <div style="font-size:0.78rem;color:#78350f;">${it.prodName||''}${it.model?' <span style="color:#92400e;">['+it.model+']</span>':''} — Qty ${it.qty||0}</div>
+          ${(typeof _iiActionInFlight !== 'undefined' && _iiActionInFlight.has(it.id))
+            ? `<button disabled style="background:rgba(120,120,120,0.1);color:#92400e;border:1px solid rgba(120,120,120,0.3);padding:5px 12px;cursor:not-allowed;font-family:var(--mono);font-size:0.66rem;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap;opacity:0.6;">Please wait…</button>`
+            : `<button onclick="openCompleteIncompleteItem('${it.id}', this)"
+              style="background:rgba(22,163,74,0.1);color:var(--green);border:1px solid rgba(22,163,74,0.35);padding:5px 12px;cursor:pointer;font-family:var(--mono);font-size:0.66rem;letter-spacing:0.05em;text-transform:uppercase;white-space:nowrap;">
+              ${it.hasSerials ? '+ Select S/N' : '✓ Complete'}
+            </button>`}
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── Bulk version of repairMissingIncompleteItemRecords(), triggered by the ──
+// "🔧 Repair Missing Records" button on the Incomplete Items page. Scans
+// every sale flagged hasIncomplete==true (a cheap, indexed query — no need
+// to scan the whole sales collection) and repairs any line that's missing
+// its tracking record, e.g. because it was written back when the
+// `incompleteItems` Firestore rule didn't exist yet.
+async function repairAllMissingIncompleteItemRecords(){
+  const fb = window._fb;
+  const btn = document.getElementById('incomplete-repair-btn');
+  if(!fb){ showToast('Not connected to Firestore — nothing to repair.'); return; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Scanning…'; }
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db,'sales'), fb.where('hasIncomplete','==', true)));
+    let scanned = 0, repairedTotal = 0, salesRepaired = 0;
+    for(const doc of snap.docs){
+      const data = doc.data();
+      scanned++;
+      const saleLike = { id: data.id || doc.id, items: data.items||[], slipNo: data.slipNo, customer: data.customer, branch: data.branch, soldBy: data.soldBy, soldByUid: data.soldByUid };
+      const before = INCOMPLETE_ITEMS.length;
+      await repairMissingIncompleteItemRecords(doc.id, saleLike);
+      // repairMissingIncompleteItemRecords already unshifts new records into
+      // INCOMPLETE_ITEMS, so a growing array length tells us it created some.
+      if(INCOMPLETE_ITEMS.length > before){ repairedTotal += (INCOMPLETE_ITEMS.length - before); salesRepaired++; }
+    }
+    if(repairedTotal){
+      showToast(`🔧 Repaired ${repairedTotal} missing record(s) across ${salesRepaired} sale(s).`);
+    } else {
+      showToast(scanned ? `Scanned ${scanned} sale(s) flagged Incomplete — nothing missing.` : 'No sales are currently flagged Incomplete.');
+    }
+    renderIncompleteItemsTable();
+    refreshIncompleteItemsBadge();
+  } catch(e){
+    console.error('Bulk repair failed:', e);
+    showToast('⚠ Repair scan failed — see console for details.');
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = '🔧 Repair Missing Records'; }
+  }
+}
+
+// ── Self-heal: recreates any incompleteItems tracking record that's missing ──
+// for a sale even though the sale's own items[] says a line is incomplete.
+// This happens whenever the write in recordIncompleteItemsForSale() failed
+// silently in the past (classic cause: a missing/incorrect Firestore rule
+// for the incompleteItems collection — permission-denied writes don't roll
+// back the sale, they just never create the tracking doc). Called every
+// time the sale is opened, so it's automatically corrected the next time
+// anyone views it — no manual data-fixing needed.
+async function repairMissingIncompleteItemRecords(firestoreId, saleLike){
+  const fb = window._fb;
+  const incompleteIdx = (saleLike.items||[])
+    .map((it,idx)=>({it,idx}))
+    .filter(x=>x.it && x.it.incomplete)
+    .map(x=>x.idx);
+  if(!incompleteIdx.length) return [];
+
+  const existingIdx = new Set();
+  const existingPending = [];
+  if(fb && firestoreId){
+    try {
+      const snap = await fb.getDocs(fb.query(fb.collection(fb.db,'incompleteItems'), fb.where('saleFirestoreId','==', firestoreId)));
+      snap.docs.forEach(d=>{
+        const data = d.data();
+        existingIdx.add(data.itemIndex);
+        if(data.status === 'pending'){
+          const rec = { id:d.id, ...data };
+          existingPending.push(rec);
+          if(!INCOMPLETE_ITEMS.find(x=>x.id===rec.id)) INCOMPLETE_ITEMS.unshift(rec);
+        }
+      });
+    } catch(e){
+      console.warn('Could not check for existing incompleteItems records (will not attempt repair):', e);
+      return existingPending; // don't risk creating duplicates if the read itself failed
+    }
+  } else {
+    INCOMPLETE_ITEMS.filter(x=>x.saleId===saleLike.id).forEach(x=>{
+      existingIdx.add(x.itemIndex);
+      if(x.status==='pending') existingPending.push(x);
+    });
+  }
+
+  const missingIdx = incompleteIdx.filter(idx => !existingIdx.has(idx));
+  if(!missingIdx.length) return existingPending;
+
+  console.warn(`Repairing sale ${saleLike.id}: ${missingIdx.length} line(s) marked Incomplete have no incompleteItems record — recreating now.`);
+  const repaired = [];
+  for(const idx of missingIdx){
+    const it = saleLike.items[idx];
+    const prod = PRICELIST.find(p=>p.id===it.prodId);
+    const payload = {
+      saleId: saleLike.id,
+      saleFirestoreId: firestoreId || '',
+      itemIndex: idx,
+      slipNo: saleLike.slipNo || saleLike.id,
+      customer: saleLike.customer,
+      branch: saleLike.branch,
+      prodId: it.prodId,
+      prodName: it.prodName || prod?.name || '',
+      model: it.model || prod?.model || '',
+      unit: it.unit || prod?.unit || '',
+      qty: it.qty,
+      unitPrice: it.unitPrice,
+      hasSerials: !!(prod && prod.hasSerials),
+      soldBy: saleLike.soldBy,
+      soldByUid: saleLike.soldByUid,
+      status: 'pending',
+      completedAt: null,
+      completedSerials: []
+    };
+    if(fb && firestoreId){
+      try {
+        const ref = await fb.addDoc(fb.collection(fb.db,'incompleteItems'), { ...payload, createdAt: fb.serverTimestamp() });
+        payload.id = ref.id;
+      } catch(e){
+        console.error('Repair failed for', saleLike.id, 'item', idx, e);
+        continue;
+      }
+    } else {
+      payload.id = 'local-' + Date.now() + '-' + idx;
+      payload.createdAt = new Date().toISOString();
+    }
+    if(!INCOMPLETE_ITEMS.find(x=>x.id===payload.id)) INCOMPLETE_ITEMS.unshift(payload);
+    repaired.push(payload);
+  }
+  if(repaired.length){ renderIncompleteItemsTable(); refreshIncompleteItemsBadge(); }
+  return [...existingPending, ...repaired];
+}
+
+// ── Finds any lines on this sale still marked Incomplete and renders an ──
+// Edit/Complete panel above the receipt, reusing the exact same serial-picker
+// / completion flow as the Incomplete Items module (openCompleteIncompleteItem).
+// This keeps a single source of truth for "how an incomplete item gets
+// resolved" — the Sales module is just another entry point into it.
+async function loadAndRenderSaleIncompleteItems(firestoreId, receiptTx){
+  const panel = document.getElementById('view-receipt-incomplete-panel');
+  if(!panel) return;
+
+  const linesIncomplete = (receiptTx.items||[]).some(it=>it && it.incomplete);
+  if(!linesIncomplete){
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.style.display = 'block';
+  panel.innerHTML = `<div style="padding:12px 14px;font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);background:#fff;border:1px solid #ddd;">LOADING INCOMPLETE ITEMS…</div>`;
+
+  let items = [];
+  try {
+    // repairMissingIncompleteItemRecords both fetches whatever pending
+    // records already exist AND recreates any that are missing, so this one
+    // call covers the normal case and the "written before the rule fix"
+    // recovery case identically.
+    items = await repairMissingIncompleteItemRecords(firestoreId, receiptTx);
+  } catch(e){
+    console.warn('Failed to load incomplete items for sale', firestoreId, e);
+    panel.innerHTML = `<div style="padding:12px 14px;font-family:var(--mono);font-size:0.68rem;color:#c62828;background:#fff;border:1px solid #ddd;">FAILED TO LOAD INCOMPLETE ITEMS FOR THIS SALE</div>`;
+    return;
+  }
+
+  if(!items.length){
+    // Every incomplete line has now been checked against Firestore and
+    // repaired if needed — if still empty, there's genuinely nothing pending
+    // (or the repair write itself failed; see console for details).
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.innerHTML = buildIncompleteItemsPanelHTML(items);
+}
 
 window.closeViewReceiptModal = function(){
   document.getElementById('modal-view-receipt').classList.remove('active');
@@ -9476,8 +9909,17 @@ function buildPOPrintHTML(po, approverOverride){
       </thead>
       <tbody>${lines}</tbody>
     </table>
-    <div style="text-align:right;font-weight:700;font-size:0.95rem;margin:8px 2px 34px;">
-      TOTAL -&gt; &nbsp;₱${fmt(po.total||0)}
+    <div style="margin:8px 2px 34px;">
+      ${po.vatApplied !== false && po.vat ? `
+      <div style="display:flex;justify-content:flex-end;gap:14px;font-size:0.82rem;margin-bottom:2px;">
+        <span>SUBTOTAL</span><span style="min-width:100px;text-align:right;">₱${fmt(po.subtotal!=null?po.subtotal:((po.total||0)-(po.vat||0)))}</span>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:14px;font-size:0.82rem;margin-bottom:6px;">
+        <span>VAT (12%)</span><span style="min-width:100px;text-align:right;">₱${fmt(po.vat||0)}</span>
+      </div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:14px;font-weight:700;font-size:0.95rem;">
+        <span>TOTAL -&gt;</span><span style="min-width:100px;text-align:right;">₱${fmt(po.total||0)}</span>
+      </div>
     </div>
 
     <!-- Signatures -->
@@ -10614,8 +11056,14 @@ function openPODetail(idOrFirestoreId){
       <button class="btn btn-ghost" onclick="closePODetail()" style="margin:0;">Close</button>`;
   }
 
-  // Print button — always available while viewing a PO's details
-  actionsEl.innerHTML = `<button class="btn btn-ghost" onclick="printPODetail()" style="width:140px;margin:0;">🖨 Print</button>` + actionsEl.innerHTML;
+  // Print button — always available while viewing a PO's details.
+  // Uses insertAdjacentHTML (not an innerHTML reassignment) so it doesn't
+  // tear down and recreate the elements already in actionsEl — in
+  // particular the #po-approver-select above, which populatePOApproverSelect()
+  // is asynchronously populating and holds a live reference to. Replacing
+  // innerHTML here would swap that select for a new detached-looking node,
+  // leaving it stuck on "Loading…" until the modal was reopened.
+  actionsEl.insertAdjacentHTML('afterbegin', `<button class="btn btn-ghost" onclick="printPODetail()" style="width:140px;margin:0;">🖨 Print</button>`);
 
   document.getElementById('modal-po-detail').classList.add('active');
 }
@@ -11535,7 +11983,7 @@ const PAGE_TITLES = {
   leave:'REQUEST FOR LEAVE', overtime:'REQUEST FOR OVERTIME',
   holiday:'WORK ON HOLIDAY', ob:'OFFICIAL BUSINESS',
   purchaseorders:'PURCHASE ORDERS', reimbursements:'REIMBURSEMENTS',
-  cashadvance:'CASH ADVANCE'
+  cashadvance:'CASH ADVANCE', incomplete:'INCOMPLETE ITEMS'
 };
 function showPage(name, el){
   if(el && el.classList.contains('locked')){
@@ -11671,6 +12119,20 @@ function reimbApplicantBranch(r){
   return (r && r.uid && REIMB_USER_BRANCHES[r.uid]) || '—';
 }
 
+// ── Case/whitespace-insensitive branch match. Reimbursement records store
+// whatever branch string was on the applicant's profile at submission time,
+// and the "Viewing" filter's options come from the live 'branches' collection —
+// if either one has stray whitespace or a differently-cased name (e.g. a
+// branch renamed or retyped slightly differently), a strict === comparison
+// silently drops every record for that branch even though "All Branches"
+// shows them fine. Normalizing both sides before comparing avoids that. ──
+function _reimbBranchNorm(s){
+  return (s || '').toString().trim().toLowerCase();
+}
+function reimbBranchMatches(recordBranch, filterBranch){
+  return _reimbBranchNorm(recordBranch) === _reimbBranchNorm(filterBranch);
+}
+
 // ── One-time migration: freezes a branch onto any reimbursement record ──
 // that was saved before the `branch` field existed on the document. Those
 // legacy records currently fall back to the applicant's LIVE profile
@@ -11733,7 +12195,7 @@ async function migrateReimbBranchBackfill(){
 // for that branch. Pending, rejected, or voided entries are excluded —
 // a Request only affects the balance once it's actually approved. ──
 function reimbBranchBalance(branch){
-  const scoped = ALL_REIMBS.filter(r => r.status === 'approved' && (!branch || reimbApplicantBranch(r) === branch));
+  const scoped = ALL_REIMBS.filter(r => r.status === 'approved' && (!branch || reimbBranchMatches(reimbApplicantBranch(r), branch)));
   return scoped.reduce((s,r) => {
     const amt = parseFloat(r.amount) || 0;
     // 'Replenish' = new money acknowledged in; 'TransferIn' = money moved in
@@ -11754,7 +12216,7 @@ function reimbBranchBalance(branch){
 // mismatch), instead of having to trust the aggregate number blindly.
 function reimbBalanceAuditRows(branch){
   const scoped = ALL_REIMBS
-    .filter(r => r.status === 'approved' && (!branch || reimbApplicantBranch(r) === branch))
+    .filter(r => r.status === 'approved' && (!branch || reimbBranchMatches(reimbApplicantBranch(r), branch)))
     .slice()
     .sort((a,b) => (a.createdAt?.seconds||0) - (b.createdAt?.seconds||0)); // oldest → newest, same order money actually moved
   let running = 0;
@@ -11922,7 +12384,7 @@ function renderReimbSummary(){
   if(!balEl) return; // page not built yet
 
   let releaseTotal = 0, ackTotal = 0;
-  const scoped = !reimbBranchFilter ? ALL_REIMBS : ALL_REIMBS.filter(r => reimbApplicantBranch(r) === reimbBranchFilter);
+  const scoped = !reimbBranchFilter ? ALL_REIMBS : ALL_REIMBS.filter(r => reimbBranchMatches(reimbApplicantBranch(r), reimbBranchFilter));
   scoped.forEach(r => {
     const amt    = parseFloat(r.amount) || 0;
     const type   = (r.type || 'Request');
@@ -11952,7 +12414,7 @@ function renderMyReimbTable(){
   if(!user) return;
   renderReimbSummary();
   MY_REIMBS = ALL_REIMBS.filter(r => r.uid === user.uid);
-  const visible = !reimbBranchFilter ? MY_REIMBS : MY_REIMBS.filter(r => reimbApplicantBranch(r) === reimbBranchFilter);
+  const visible = !reimbBranchFilter ? MY_REIMBS : MY_REIMBS.filter(r => reimbBranchMatches(reimbApplicantBranch(r), reimbBranchFilter));
   const tbody = document.getElementById('my-reimb-tbody');
   const empty = document.getElementById('my-reimb-empty');
   if(!tbody) return;
@@ -12013,7 +12475,7 @@ function renderReimbAdminTable(){
   const clearBtn = document.getElementById('reimb-month-clear-btn');
   if (clearBtn) clearBtn.style.display = monthF ? '' : 'none';
 
-  const branchScoped = !reimbBranchFilter ? ALL_REIMBS : ALL_REIMBS.filter(r => reimbApplicantBranch(r) === reimbBranchFilter);
+  const branchScoped = !reimbBranchFilter ? ALL_REIMBS : ALL_REIMBS.filter(r => reimbBranchMatches(reimbApplicantBranch(r), reimbBranchFilter));
 
   let filtered = branchScoped.filter(r => {
     const matchStatus = !statusF || r.status === statusF;
@@ -17987,6 +18449,9 @@ function syncHRBranchSelects() {
 
     <!-- Body -->
     <div style="padding:20px;max-height:72vh;overflow-y:auto;background:#e8e8e8;">
+      <!-- Edit/Complete panel for any lines on this sale still marked Incomplete.
+           Populated by loadAndRenderSaleIncompleteItems(); hidden/empty otherwise. -->
+      <div id="view-receipt-incomplete-panel" style="display:none;max-width:680px;margin:0 auto 14px;"></div>
       <div id="view-receipt-body"></div>
     </div>
 
@@ -20353,20 +20818,9 @@ async function hasPendingLeadRequest(uid) {
 window.openNewLeadModal = async function() {
   // Any signed-in user can open this modal. Admin/super save directly;
   // a plain user's submission goes into leadRequests for Super Admin approval
-  // (see saveLead()). Regular users are limited to one pending request at a
-  // time to avoid double submission.
+  // (see saveLead()). Regular users may submit as many requests as they like —
+  // each still requires Super Admin approval before becoming a real lead.
   const role = window._currentRole || 'user';
-  const uid  = window._currentFirebaseUser?.uid;
-  if (role !== 'admin' && role !== 'super') {
-    const btn = document.getElementById('leads-new-btn');
-    if (btn) { btn.disabled = true; }
-    const pending = await hasPendingLeadRequest(uid);
-    if (btn) { btn.disabled = false; }
-    if (pending) {
-      showToast('⚠ You already have a lead request awaiting Super Admin approval. Please wait for it to be reviewed before submitting another.', 5000);
-      return;
-    }
-  }
   _leadEditId = null;
   document.getElementById('lead-modal-title').textContent = (role === 'admin' || role === 'super') ? 'New Lead' : 'Request New Lead';
   ['lead-company','lead-contact','lead-email','lead-phone','lead-notes','lead-source'].forEach(id => {
@@ -20462,15 +20916,9 @@ window.saveLead = async function() {
     } else {
       // Plain user — file a request instead of writing to `leads` directly.
       // A Super Admin must approve it (see approveLeadRequest below).
-      // Re-check for an existing pending request here too (not just in
-      // openNewLeadModal) as a last-line guard against double-clicks or a
-      // second tab submitting before this one refreshes.
+      // Users may have multiple pending requests at once; each is queued
+      // independently for Super Admin review.
       const uid = window._currentFirebaseUser?.uid || '';
-      if (await hasPendingLeadRequest(uid)) {
-        showToast('⚠ You already have a lead request awaiting Super Admin approval.', 5000);
-        if (btn) { btn.disabled = false; btn.textContent = 'Submit Request'; }
-        return;
-      }
       delete payload.updatedAt; delete payload.updatedBy; // not meaningful until it becomes a real lead
       await fb.addDoc(fb.collection(fb.db, 'leadRequests'), {
         type: 'add',
@@ -24013,6 +24461,188 @@ window.saveLeaveCreditSettings = async function() {
   }
 };
 
+// ── Super Admin: per-employee leave credit overrides ────────────
+// Lets a Super Admin give one specific employee different pool
+// sizes than the company-wide defaults above, stored on that
+// employee's own users/{uid} doc under leaveCredits.{key}. Any key
+// left unset there falls back to LEAVE_TYPE_DEFAULTS automatically
+// (see computeLeaveBalances / resolve()).
+let ELC_USERS_CACHE = []; // [{ uid, name, email, leaveCredits }]
+
+async function loadUsersForEmployeeLeaveCredits() {
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    const users = [];
+    snap.forEach(d => {
+      const data = d.data();
+      users.push({
+        uid: d.id,
+        name: data.displayName || data.fullName || data.email?.split('@')[0] || d.id,
+        email: data.email || '',
+        leaveCredits: (data.leaveCredits && typeof data.leaveCredits === 'object') ? data.leaveCredits : null
+      });
+    });
+    users.sort((a, b) => a.name.localeCompare(b.name));
+    ELC_USERS_CACHE = users;
+
+    const sel = document.getElementById('elc-employee-select');
+    if (sel) {
+      const prevVal = sel.value;
+      sel.innerHTML = '<option value="">— Select an employee —</option>' +
+        users.map(u => `<option value="${u.uid}">${u.name}${u.email ? ' (' + u.email + ')' : ''}${u.leaveCredits ? ' — custom' : ''}</option>`).join('');
+      if (prevVal && users.some(u => u.uid === prevVal)) sel.value = prevVal;
+    }
+    renderEmployeeLeaveOverridesTable();
+  } catch (e) {
+    console.warn('Could not load users for employee leave credits:', e);
+  }
+}
+
+// Populates the override form with the selected employee's current
+// values — blank input means "no override, uses the default".
+window.loadEmployeeLeaveCredits = function() {
+  const uid = document.getElementById('elc-employee-select')?.value || '';
+  const wrap  = document.getElementById('elc-fields-wrap');
+  const badge = document.getElementById('elc-override-badge');
+  const msgEl = document.getElementById('elc-msg');
+  if (msgEl) msgEl.innerHTML = '';
+  if (!uid) { if (wrap) wrap.style.display = 'none'; if (badge) badge.style.display = 'none'; return; }
+
+  const user = ELC_USERS_CACHE.find(u => u.uid === uid);
+  const lc = user?.leaveCredits || {};
+  LEAVE_CREDIT_SETTING_KEYS.forEach(key => {
+    const el = document.getElementById(`elc-${key}`);
+    if (!el) return;
+    el.value = (lc[key] != null) ? lc[key] : '';
+    el.placeholder = `Default: ${LEAVE_TYPE_DEFAULTS[key] != null ? LEAVE_TYPE_DEFAULTS[key] : LEAVE_TYPE_DEFAULT_FALLBACK[key]}`;
+  });
+  if (wrap) wrap.style.display = '';
+  if (badge) badge.style.display = (user && user.leaveCredits) ? '' : 'none';
+};
+
+// Saves the override for the currently-selected employee. Fields
+// left blank clear any existing override for that pool (falls back
+// to the default) rather than being written as 0.
+window.saveEmployeeLeaveCredits = async function() {
+  const fb    = window._fb;
+  const uid   = document.getElementById('elc-employee-select')?.value || '';
+  const msgEl = document.getElementById('elc-msg');
+  const setMsg = (html, type = 'error') => { if (msgEl) msgEl.innerHTML = `<div class="msg msg-${type}">${html}</div>`; };
+  if (!fb) { setMsg('Not connected to database.'); return; }
+  if (!uid) { setMsg('Select an employee first.'); return; }
+
+  const updates = {};
+  for (const key of LEAVE_CREDIT_SETTING_KEYS) {
+    const raw = document.getElementById(`elc-${key}`)?.value;
+    if (raw === '' || raw == null) {
+      updates[`leaveCredits.${key}`] = fb.deleteField();
+      continue;
+    }
+    const num = parseFloat(raw);
+    if (isNaN(num) || num < 0) {
+      setMsg('Fields must be blank (to use the default) or a valid number of 0 or greater.');
+      return;
+    }
+    updates[`leaveCredits.${key}`] = num;
+  }
+
+  const btn = document.getElementById('elc-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  setMsg('Saving…', 'info');
+
+  try {
+    updates['leaveCreditsUpdatedAt'] = fb.serverTimestamp();
+    updates['leaveCreditsUpdatedBy'] = window._currentFirebaseUser?.uid || null;
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), updates);
+
+    setMsg('Saved. This employee now uses these overrides in place of the defaults for any field set.', 'success');
+    if (typeof showToast === 'function') showToast('Employee leave credits updated.');
+
+    await loadUsersForEmployeeLeaveCredits();
+    const sel = document.getElementById('elc-employee-select');
+    if (sel) sel.value = uid;
+    window.loadEmployeeLeaveCredits();
+  } catch (err) {
+    console.error('saveEmployeeLeaveCredits failed:', err);
+    setMsg('Failed to save. [' + (err.code || err.message || err) + ']');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Override'; }
+  }
+};
+
+// Clears every override field for the selected employee in one go,
+// putting them back on the company-wide defaults entirely.
+window.resetEmployeeLeaveCredits = async function() {
+  const fb    = window._fb;
+  const uid   = document.getElementById('elc-employee-select')?.value || '';
+  const msgEl = document.getElementById('elc-msg');
+  const setMsg = (html, type = 'error') => { if (msgEl) msgEl.innerHTML = `<div class="msg msg-${type}">${html}</div>`; };
+  if (!fb) { setMsg('Not connected to database.'); return; }
+  if (!uid) { setMsg('Select an employee first.'); return; }
+
+  const btn = document.getElementById('elc-reset-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Resetting…'; }
+  setMsg('Resetting…', 'info');
+
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'users', uid), {
+      leaveCredits: fb.deleteField(),
+      leaveCreditsUpdatedAt: fb.serverTimestamp(),
+      leaveCreditsUpdatedBy: window._currentFirebaseUser?.uid || null
+    });
+    setMsg('Reset. This employee now uses the company-wide defaults for every pool.', 'success');
+    if (typeof showToast === 'function') showToast('Employee leave credits reset to default.');
+
+    await loadUsersForEmployeeLeaveCredits();
+    const sel = document.getElementById('elc-employee-select');
+    if (sel) sel.value = uid;
+    window.loadEmployeeLeaveCredits();
+  } catch (err) {
+    console.error('resetEmployeeLeaveCredits failed:', err);
+    setMsg('Failed to reset. [' + (err.code || err.message || err) + ']');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Reset to Default'; }
+  }
+};
+
+// Lists every employee who currently has at least one custom pool
+// value set, so a Super Admin can see overrides at a glance without
+// clicking through each employee one by one.
+function renderEmployeeLeaveOverridesTable() {
+  const tbody = document.getElementById('elc-overrides-tbody');
+  const empty = document.getElementById('elc-overrides-empty');
+  if (!tbody) return;
+
+  const withOverrides = ELC_USERS_CACHE.filter(u => u.leaveCredits && Object.keys(u.leaveCredits).some(k => LEAVE_CREDIT_SETTING_KEYS.includes(k) && u.leaveCredits[k] != null));
+
+  if (!withOverrides.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const cell = (u, key) => u.leaveCredits && u.leaveCredits[key] != null
+    ? `<span style="color:var(--red);font-weight:700;">${u.leaveCredits[key]}</span>`
+    : `<span style="color:var(--text-muted);">default</span>`;
+
+  tbody.innerHTML = withOverrides.map(u => `<tr>
+      <td style="font-weight:600;">${u.name}${u.email ? `<div style="font-size:0.6rem;font-weight:400;color:var(--text-muted);font-family:var(--mono);margin-top:2px;">${u.email}</div>` : ''}</td>
+      <td>${cell(u, 'vacation')}</td>
+      <td>${cell(u, 'sick')}</td>
+      <td>${cell(u, 'special')}</td>
+      <td>${cell(u, 'maternity')}</td>
+      <td>${cell(u, 'paternity')}</td>
+      <td>${cell(u, 'bereavement')}</td>
+      <td>${cell(u, 'emergency')}</td>
+      <td style="text-align:center;">
+        <button onclick="document.getElementById('elc-employee-select').value='${u.uid}'; window.loadEmployeeLeaveCredits(); document.getElementById('elc-employee-select').scrollIntoView({behavior:'smooth', block:'center'});" style="background:var(--red);color:#fff;border:none;padding:4px 12px;cursor:pointer;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;">EDIT</button>
+      </td>
+    </tr>`).join('');
+}
+
 // Computes total / used / remaining for each of the 3 credit pools
 // from a user's leave request docs + their leaveCredits field.
 // leaveCreditsField may be:
@@ -24060,9 +24690,14 @@ async function loadLeavePage() {
   const role = window._currentRole;
   const adminPanel    = document.getElementById('leave-admin-panel');
   const settingsPanel = document.getElementById('leave-credit-settings-panel');
+  const employeeOverridesPanel = document.getElementById('employee-leave-credit-panel');
   if (adminPanel) adminPanel.style.display = (role === 'super' || role === 'admin') ? '' : 'none';
   if (settingsPanel) settingsPanel.style.display = (role === 'super') ? '' : 'none';
-  if (role === 'super') populateLeaveCreditSettingsForm();
+  if (employeeOverridesPanel) employeeOverridesPanel.style.display = (role === 'super') ? '' : 'none';
+  if (role === 'super') {
+    populateLeaveCreditSettingsForm();
+    loadUsersForEmployeeLeaveCredits();
+  }
   if (role === 'super' || role === 'admin') renderLeaveAdminTable();
   updateLeaveNavBadge();
   if (typeof loadMyLeaveSummary === 'function') loadMyLeaveSummary();
@@ -28221,6 +28856,605 @@ window.voidRMAItem = async function(id, btn) {
 
 // ═══════════════════════════════════════════════════════════════
 //  END RMA ITEMS MODULE
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+//  INCOMPLETE ITEMS MODULE
+//  Connects Sales ⇄ Inventory. A Sale line item marked "Incomplete" is
+//  saved WITHOUT a serial number chosen (and without deducting inventory).
+//  That line is logged here so it can be tracked down and resolved later —
+//  either by picking the actual serial number(s) once known, or (for
+//  non-serialized products) confirming the stock deduction. Only then does
+//  inventory get touched and the original sale's item record get updated.
+// ═══════════════════════════════════════════════════════════════
+
+let INCOMPLETE_ITEMS = [];
+let _iiUnsub = null; // active onSnapshot unsubscribe fn, if any
+
+// ── Called right after a sale is submitted — logs every line item that was ──
+// marked Incomplete on the Generate Sales form. Nothing here deducts
+// inventory; that only happens once the item is later Completed.
+// ── Called right after a sale is submitted — logs every line item that was ──
+// marked Incomplete on the Generate Sales form. Nothing here deducts
+// inventory; that only happens once the item is later Completed.
+// Returns the list of created records so the caller (e.g. the just-submitted
+// receipt view) can immediately offer an Edit/Complete action without having
+// to wait for the Incomplete Items page's live listener to catch up.
+async function recordIncompleteItemsForSale(tx){
+  const fb = window._fb;
+  const entries = (tx.items||[]).map((it,idx)=>({it,idx})).filter(x=>x.it.incomplete);
+  if(!entries.length) return [];
+
+  const created = [];
+  for(const {it, idx} of entries){
+    const prod = PRICELIST.find(p=>p.id===it.prodId);
+    const payload = {
+      saleId: tx.id,
+      saleFirestoreId: tx.firestoreId || '',
+      itemIndex: idx,
+      slipNo: tx.slipNo || tx.id,
+      customer: tx.customer,
+      branch: tx.branch,
+      prodId: it.prodId,
+      prodName: it.prodName || prod?.name || '',
+      model: it.model || prod?.model || '',
+      unit: it.unit || prod?.unit || '',
+      qty: it.qty,
+      unitPrice: it.unitPrice,
+      hasSerials: !!(prod && prod.hasSerials),
+      soldBy: tx.soldBy,
+      soldByUid: tx.soldByUid,
+      status: 'pending',
+      completedAt: null,
+      completedSerials: []
+    };
+    if(fb){
+      try {
+        const ref = await fb.addDoc(fb.collection(fb.db,'incompleteItems'), { ...payload, createdAt: fb.serverTimestamp() });
+        payload.id = ref.id;
+        // Always reflect it locally right away — if a live listener is also
+        // active on the Incomplete Items page it will later replace the whole
+        // array wholesale from Firestore, which is harmless since this same
+        // doc will be in that snapshot too.
+        if(!INCOMPLETE_ITEMS.find(x=>x.id===payload.id)) INCOMPLETE_ITEMS.unshift(payload);
+      } catch(e){
+        console.error('Failed to record incomplete item:', e);
+        showToast('⚠ Sale saved, but logging "' + (payload.prodName||'item') + '" to Incomplete Items failed.');
+        continue;
+      }
+    } else {
+      payload.id = 'local-' + Date.now() + '-' + idx;
+      payload.createdAt = new Date().toISOString();
+      INCOMPLETE_ITEMS.unshift(payload);
+    }
+    created.push(payload);
+  }
+  renderIncompleteItemsTable();
+  refreshIncompleteItemsBadge();
+  return created;
+}
+
+
+// ── Subscribe in real time, same pattern as RMA Items, so anyone completing ──
+// an item elsewhere is instantly reflected here.
+window.loadIncompleteItems = function() {
+  const fb = window._fb;
+  if (!fb) { renderIncompleteItemsTable(); return; }
+  if (_iiUnsub) { _iiUnsub(); _iiUnsub = null; }
+  try {
+    const q = fb.query(fb.collection(fb.db, 'incompleteItems'), fb.orderBy('createdAt', 'desc'));
+    _iiUnsub = fb.onSnapshot(q, (snap) => {
+      INCOMPLETE_ITEMS = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      renderIncompleteItemsTable();
+      refreshIncompleteItemsBadge();
+    }, (e) => {
+      console.warn('Incomplete Items live sync error:', e);
+      showToast('⚠ Lost live sync on Incomplete Items — try switching pages and back.');
+    });
+  } catch(e) {
+    console.warn('Incomplete Items load error:', e);
+    renderIncompleteItemsTable();
+  }
+};
+window.unloadIncompleteItems = function() {
+  if (_iiUnsub) { _iiUnsub(); _iiUnsub = null; }
+};
+
+function refreshIncompleteItemsBadge(){
+  const badge = document.getElementById('badge-incomplete-nav');
+  if(!badge) return;
+  const pending = INCOMPLETE_ITEMS.filter(x=>x.status!=='completed').length;
+  badge.textContent = pending;
+  badge.style.display = pending > 0 ? 'inline-block' : 'none';
+}
+
+function renderIncompleteItemsTable(){
+  const tbody = document.getElementById('incomplete-tbody');
+  const empty = document.getElementById('incomplete-empty');
+  if(!tbody) return;
+
+  const search = (document.getElementById('incomplete-search')?.value || '').toLowerCase().trim();
+  const statusFilter = document.getElementById('incomplete-status-filter')?.value || 'pending';
+
+  let rows = INCOMPLETE_ITEMS.slice();
+  if(statusFilter === 'pending') rows = rows.filter(x => x.status !== 'completed');
+  else if(statusFilter === 'completed') rows = rows.filter(x => x.status === 'completed');
+
+  if(search){
+    rows = rows.filter(x =>
+      (x.prodName||'').toLowerCase().includes(search) ||
+      (x.customer||'').toLowerCase().includes(search) ||
+      (x.slipNo||'').toLowerCase().includes(search) ||
+      (x.model||'').toLowerCase().includes(search)
+    );
+  }
+
+  if(!rows.length){
+    tbody.innerHTML = '';
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(item=>{
+    const completed = item.status === 'completed';
+    const statusBadge = completed
+      ? `<span class="po-status approved">Completed</span>`
+      : `<span class="po-status pending">Pending</span>`;
+    const manageCell = completed
+      ? `<span style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);">${(item.completedSerials||[]).length ? '🏷 '+item.completedSerials.map(s=>s.serial).join(', ') : '✓ Done'}</span>`
+      : (_iiActionInFlight.has(item.id)
+        ? `<button disabled style="background:rgba(120,120,120,0.1);color:var(--text-muted);border:1px solid rgba(120,120,120,0.3);padding:6px 14px;cursor:not-allowed;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;opacity:0.6;">Please wait…</button>`
+        : `<button onclick="openCompleteIncompleteItem('${item.id}', this)"
+          style="background:rgba(22,163,74,0.1);color:var(--green);border:1px solid rgba(22,163,74,0.35);padding:6px 14px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;">
+          ${item.hasSerials ? '+ Select S/N' : '✓ Complete'}
+        </button>`);
+    return `<tr>
+      <td class="mono">${item.slipNo||item.saleId||''}</td>
+      <td>${item.customer||''}</td>
+      <td>${item.branch||''}</td>
+      <td>${item.prodName||''}</td>
+      <td class="mono">${item.model||'—'}</td>
+      <td style="text-align:center;" class="mono">${item.qty||0}</td>
+      <td>${item.soldBy||''}</td>
+      <td style="text-align:center;">${statusBadge}</td>
+      <td style="text-align:center;">${manageCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPLETING AN INCOMPLETE ITEM
+// ═══════════════════════════════════════════════════════════════
+let _iiCompletingId = null;
+let _iiAvailable    = [];  // in-stock serials for the item's product+branch
+let _iiSelectedIds  = [];
+let _iiActionInFlight = new Set(); // item ids currently being opened/finalized — blocks a second click on the same row
+let _iiConfirmInFlight = false;    // guards the picker's own "Complete Item" button specifically
+
+// ── Disables a button for the duration of an async action and restores it ──
+// afterwards (success or failure), so a fast double-click (or an itchy
+// finger on a slow connection) can't fire the handler twice. Safe to call
+// even if the button gets removed from the DOM mid-flight (e.g. the row it
+// belonged to was re-rendered away) — it just skips the restore in that case.
+function lockButtonDuring(btnEl, busyLabel){
+  if(!btnEl) return () => {};
+  const original = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.style.opacity = '0.55';
+  btnEl.style.cursor = 'not-allowed';
+  if(busyLabel) btnEl.textContent = busyLabel;
+  return function release(){
+    if(!document.body.contains(btnEl)) return; // row was re-rendered/removed — nothing to restore
+    btnEl.disabled = false;
+    btnEl.style.opacity = '';
+    btnEl.style.cursor = '';
+    btnEl.innerHTML = original;
+  };
+}
+
+async function openCompleteIncompleteItem(id, btnEl){
+  // A disabled button shouldn't dispatch click at all, but guard anyway in
+  // case this gets invoked programmatically (e.g. from the Sales panel).
+  if(btnEl && btnEl.disabled) return;
+  if(_iiActionInFlight.has(id)){ showToast('Already processing this item — please wait.'); return; }
+
+  const item = INCOMPLETE_ITEMS.find(x=>x.id===id);
+  if(!item){ showToast('Item not found.'); return; }
+  if(item.status === 'completed'){ showToast('This item was already completed.'); return; }
+
+  _iiActionInFlight.add(id);
+  const release = lockButtonDuring(btnEl, 'Please wait…');
+
+  if(!item.hasSerials){
+    const confirmed = confirm(`Mark "${item.prodName}" (qty ${item.qty}) complete and deduct ${item.qty} unit(s) from ${item.branch} stock now?`);
+    if(!confirmed){ _iiActionInFlight.delete(id); release(); return; }
+    try {
+      await finalizeIncompleteItemNoSerial(item);
+    } finally {
+      _iiActionInFlight.delete(id);
+      release();
+    }
+    return;
+  }
+
+  const prod = PRICELIST.find(p=>p.id===item.prodId);
+  if(!prod){ showToast('This product was not found in the current Inventory list.'); _iiActionInFlight.delete(id); release(); return; }
+
+  _iiCompletingId = id;
+  _iiSelectedIds  = [];
+  document.getElementById('ii-subtitle').textContent = `${item.prodName} · ${item.branch}  ·  Choose ${item.qty} serial number(s)`;
+  document.getElementById('ii-search').value = '';
+  document.getElementById('ii-list').innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING SERIALS…</div>`;
+  document.getElementById('modal-ii-serial').classList.add('active');
+
+  const fb = window._fb;
+  try{
+    let all;
+    if(!fb || String(prod.id).startsWith('local')){
+      all = (prod._serialsList||[]).map((s,i)=>({ id: 'local-'+i, serial: s.serial||s, status: s.status||'in_stock', branch: s.branch||'' }));
+    } else {
+      const snap = await fb.getDocs(fb.collection(fb.db,'stocks',prod.id,'serials'));
+      all = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+    }
+    _iiAvailable = all.filter(s => s.branch === item.branch && s.status === 'in_stock');
+  } catch(e){
+    console.error('Failed to load serials for Incomplete Items picker:', e);
+    document.getElementById('ii-list').innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:#ef5350;">FAILED TO LOAD SERIAL DATA</div>`;
+    _iiActionInFlight.delete(id);
+    release();
+    return;
+  }
+  renderIICompletePickerBody();
+  // The picker is open and interactive now — release the row-button lock.
+  // The remaining protection against a double submission lives on the
+  // picker's own "Complete Item" button (confirmIICompletePicker) and, as a
+  // last line of defense, inside the Firestore transaction itself, so it's
+  // safe to let the row be clickable again while the user is still choosing.
+  _iiActionInFlight.delete(id);
+  release();
+}
+
+function closeIICompletePicker(){
+  document.getElementById('modal-ii-serial').classList.remove('active');
+  _iiCompletingId = null; _iiAvailable = []; _iiSelectedIds = [];
+}
+
+function renderIICompletePickerBody(){
+  const q = (document.getElementById('ii-search')?.value || '').toLowerCase();
+  const item = INCOMPLETE_ITEMS.find(x=>x.id===_iiCompletingId);
+  const need = item ? item.qty : 0;
+  const list = document.getElementById('ii-list');
+  const countEl = document.getElementById('ii-count');
+
+  countEl.textContent = `${_iiSelectedIds.length} of ${need} selected`;
+  countEl.style.color = _iiSelectedIds.length === need ? 'var(--green)' : 'var(--text-muted)';
+
+  const filtered = _iiAvailable.filter(s => !q || String(s.serial).toLowerCase().includes(q));
+  if(!filtered.length){
+    list.innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">NO AVAILABLE SERIALS${item&&item.branch ? ' AT '+item.branch.toUpperCase() : ''}</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(s=>{
+    const checked = _iiSelectedIds.includes(s.id);
+    return `<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;${checked?'background:var(--green-dim);':''}">
+      <input type="checkbox" ${checked?'checked':''} onchange="toggleIISerialPick('${s.id}')"
+        style="width:15px;height:15px;accent-color:var(--red);cursor:pointer;"/>
+      <span style="font-family:'Share Tech Mono',monospace;font-size:0.84rem;font-weight:700;color:var(--text);letter-spacing:0.04em;">${s.serial}</span>
+    </label>`;
+  }).join('');
+}
+
+function toggleIISerialPick(serialId){
+  const item = INCOMPLETE_ITEMS.find(x=>x.id===_iiCompletingId);
+  const need = item ? item.qty : 0;
+  const pos = _iiSelectedIds.indexOf(serialId);
+  if(pos >= 0){
+    _iiSelectedIds.splice(pos,1);
+  } else {
+    if(_iiSelectedIds.length >= need){
+      showToast(`You only need ${need} serial number(s) for this item. Unselect one first.`);
+      renderIICompletePickerBody();
+      return;
+    }
+    _iiSelectedIds.push(serialId);
+  }
+  renderIICompletePickerBody();
+}
+
+async function confirmIICompletePicker(){
+  if(_iiConfirmInFlight) return; // ignore a second click while the first is still saving
+  const item = INCOMPLETE_ITEMS.find(x=>x.id===_iiCompletingId);
+  if(!item){ closeIICompletePicker(); return; }
+  if(_iiSelectedIds.length !== item.qty){
+    showToast(`Please select exactly ${item.qty} serial number(s).`);
+    return;
+  }
+  const chosenSerials = _iiSelectedIds.map(id=>{
+    const s = _iiAvailable.find(x=>x.id===id);
+    return { id, serial: s ? s.serial : id };
+  });
+
+  _iiConfirmInFlight = true;
+  _iiActionInFlight.add(item.id); // also blocks the row/panel button for this item while this is in flight
+  const confirmBtn = document.querySelector('#modal-ii-serial button.btn-red');
+  const release = lockButtonDuring(confirmBtn, 'Saving…');
+  try {
+    closeIICompletePicker();
+    await finalizeIncompleteItemWithSerials(item, chosenSerials);
+  } finally {
+    _iiConfirmInFlight = false;
+    _iiActionInFlight.delete(item.id);
+    release();
+  }
+}
+
+// ── For serialized products: marks the chosen serial(s) sold and deducts them ──
+// from stock, exactly like a normal sale would have at checkout time.
+//
+// Everything that must not happen twice — reading the incompleteItems record,
+// verifying it isn't already Completed, verifying each chosen serial is still
+// 'in_stock', marking the serials sold, and decrementing the stock counters —
+// happens inside a single Firestore transaction. That closes the race where
+// two people complete the same incomplete item (or pick the same serial for
+// two different incomplete items) at nearly the same moment: whichever commit
+// lands second sees the already-updated documents and is rejected instead of
+// silently duplicating the serial assignment or the inventory deduction.
+async function finalizeIncompleteItemWithSerials(item, chosenSerials){
+  const fb = window._fb;
+  const prod = PRICELIST.find(p=>p.id===item.prodId);
+  try {
+    if(fb && prod && !String(prod.id).startsWith('local') && item.id && !String(item.id).startsWith('local')){
+      const iiRef     = fb.doc(fb.db,'incompleteItems', item.id);
+      const stockRef  = fb.doc(fb.db,'stocks', prod.id);
+      const serialRefs = chosenSerials.map(sel => fb.doc(fb.db,'stocks',prod.id,'serials',sel.id));
+
+      let txResult = null;
+      await fb.runTransaction(fb.db, async (tx) => {
+        const iiSnap = await tx.get(iiRef);
+        if(!iiSnap.exists()) throw Object.assign(new Error('NOT_FOUND'), {code:'NOT_FOUND'});
+        if(iiSnap.data().status === 'completed') throw Object.assign(new Error('ALREADY_COMPLETED'), {code:'ALREADY_COMPLETED'});
+
+        const serialSnaps = [];
+        for(const ref of serialRefs) serialSnaps.push(await tx.get(ref));
+        for(let i=0;i<serialSnaps.length;i++){
+          const s = serialSnaps[i];
+          if(!s.exists() || s.data().status !== 'in_stock'){
+            throw Object.assign(new Error('SERIAL_TAKEN'), {code:'SERIAL_TAKEN', serial: chosenSerials[i].serial});
+          }
+        }
+        // Guard against picking the same serial twice within one submission
+        // (shouldn't happen via the checkbox UI, but never trust the client).
+        const uniqueIds = new Set(chosenSerials.map(s=>s.id));
+        if(uniqueIds.size !== chosenSerials.length){
+          throw Object.assign(new Error('DUPLICATE_SERIAL'), {code:'DUPLICATE_SERIAL'});
+        }
+
+        const stockSnap = await tx.get(stockRef);
+        const server = stockSnap.exists() ? stockSnap.data() : {};
+        const serverStock    = typeof server.stockQty === 'number' ? server.stockQty : 0;
+        const serverBranches = server.branches ? { ...server.branches } : {};
+        const newCombined = Math.max(0, serverStock - chosenSerials.length);
+        const updatedBranches = { ...serverBranches };
+        if(item.branch){
+          const cur = (updatedBranches[item.branch] !== undefined) ? (parseInt(updatedBranches[item.branch])||0) : 0;
+          updatedBranches[item.branch] = Math.max(0, cur - chosenSerials.length);
+        }
+
+        serialRefs.forEach(ref => tx.update(ref, { status:'sold', soldTo: item.customer, soldAt: fb.serverTimestamp() }));
+        tx.update(stockRef, { stockQty: newCombined, branches: updatedBranches });
+        tx.update(iiRef, { status:'completed', completedAt: fb.serverTimestamp(), completedSerials: chosenSerials });
+
+        txResult = { newCombined, updatedBranches };
+      });
+
+      prod.stock = txResult.newCombined;
+      prod.branches = txResult.updatedBranches;
+    } else if(prod && prod._serialsList){
+      // Local/demo mode (no Firestore) — no transaction available, so at
+      // least re-verify each serial is still unsold right before assigning it.
+      for(const sel of chosenSerials){
+        const s = prod._serialsList.find(x=>x.serial===sel.serial);
+        if(!s || s.status === 'sold') throw Object.assign(new Error('SERIAL_TAKEN'), {code:'SERIAL_TAKEN', serial: sel.serial});
+      }
+      chosenSerials.forEach(sel=>{
+        const s = prod._serialsList.find(x=> x.serial===sel.serial && x.status!=='sold');
+        if(s){ s.status='sold'; s.soldTo=item.customer; s.soldAt=null; }
+      });
+      prod.stock = (prod._serialsList||[]).filter(x=>x.status==='in_stock').length + (parseInt(prod.pendingQty)||0);
+    }
+    await completeIncompleteItemRecord(item, chosenSerials);
+    renderInventory();
+    showToast('Item completed — inventory deducted and serial number(s) assigned.');
+  } catch(e){
+    if(e && e.code === 'ALREADY_COMPLETED'){
+      showToast('This item was already completed — nothing more to do here.');
+      item.status = 'completed';
+      renderIncompleteItemsTable(); refreshIncompleteItemsBadge();
+    } else if(e && e.code === 'SERIAL_TAKEN'){
+      showToast(`⚠ Serial ${e.serial||''} was just taken by another transaction — please pick a different one.`.replace('  ',' '));
+      // Refresh the picker with the current in-stock list so the user can reselect.
+      openCompleteIncompleteItem(item.id);
+    } else if(e && e.code === 'DUPLICATE_SERIAL'){
+      showToast('⚠ The same serial number was selected twice — please pick distinct serials.');
+    } else {
+      console.error('Failed to finalize incomplete item:', e);
+      showToast('⚠ Failed to complete this item — please check Inventory and try again.');
+    }
+  }
+}
+
+// ── For non-serialized (qty-tracked) products: just deducts the qty now. ──
+// Same atomicity guarantee as above: the "still pending?" check and the stock
+// decrement happen in one transaction, so clicking Complete twice in a row
+// (or two people completing the same item at once) can only deduct once.
+async function finalizeIncompleteItemNoSerial(item){
+  const fb = window._fb;
+  const prod = PRICELIST.find(p=>p.id===item.prodId);
+  try {
+    if(fb && item.id && !String(item.id).startsWith('local')){
+      const iiRef = fb.doc(fb.db,'incompleteItems', item.id);
+      const stockRef = (prod && !String(prod.id).startsWith('local')) ? fb.doc(fb.db,'stocks', prod.id) : null;
+
+      let txResult = null;
+      await fb.runTransaction(fb.db, async (tx) => {
+        const iiSnap = await tx.get(iiRef);
+        if(!iiSnap.exists()) throw Object.assign(new Error('NOT_FOUND'), {code:'NOT_FOUND'});
+        if(iiSnap.data().status === 'completed') throw Object.assign(new Error('ALREADY_COMPLETED'), {code:'ALREADY_COMPLETED'});
+
+        if(stockRef){
+          const stockSnap = await tx.get(stockRef);
+          if(!stockSnap.exists()) throw Object.assign(new Error('INVENTORY_MISSING'), {code:'INVENTORY_MISSING'});
+          const server = stockSnap.data();
+          const serverStock    = typeof server.stockQty === 'number' ? server.stockQty : 0;
+          const serverBranches = server.branches ? { ...server.branches } : {};
+          const newCombined = serverStock - item.qty;
+          const updatedBranches = { ...serverBranches };
+          if(item.branch){
+            const cur = (updatedBranches[item.branch] !== undefined) ? (parseInt(updatedBranches[item.branch])||0) : 0;
+            updatedBranches[item.branch] = cur - item.qty;
+          }
+          tx.update(stockRef, { stockQty: newCombined, branches: updatedBranches });
+          txResult = { newCombined, updatedBranches };
+        }
+        tx.update(iiRef, { status:'completed', completedAt: fb.serverTimestamp(), completedSerials: [] });
+      });
+
+      if(prod && txResult){ prod.stock = txResult.newCombined; prod.branches = txResult.updatedBranches; }
+    } else if(prod){
+      await deductQtyStockForSale(prod, item.branch, item.qty);
+    }
+    await completeIncompleteItemRecord(item, []);
+    renderInventory();
+    showToast('Item completed — inventory deducted.');
+  } catch(e){
+    if(e && e.code === 'ALREADY_COMPLETED'){
+      showToast('This item was already completed — nothing more to do here.');
+      item.status = 'completed';
+      renderIncompleteItemsTable(); refreshIncompleteItemsBadge();
+    } else {
+      console.error('Failed to finalize incomplete item (no serial):', e);
+      showToast('⚠ Failed to complete this item — please check Inventory and try again.');
+    }
+  }
+}
+
+// ── Shared tail-end: marks the Incomplete Items record completed, and syncs ──
+// the change back onto the original sale document (and in-memory SALES_LOG)
+// so a reprinted receipt correctly shows the serial number(s) / no longer
+// shows the Incomplete warning.
+async function completeIncompleteItemRecord(item, serials){
+  const fb = window._fb;
+
+  item.status = 'completed';
+  item.completedAt = new Date().toISOString();
+  item.completedSerials = serials;
+
+  if(fb && item.id && !String(item.id).startsWith('local')){
+    try {
+      await fb.updateDoc(fb.doc(fb.db,'incompleteItems', item.id), {
+        status: 'completed', completedAt: fb.serverTimestamp(), completedSerials: serials
+      });
+    } catch(e){ console.warn('Could not update Incomplete Items record:', e); }
+
+    if(item.saleFirestoreId){
+      try {
+        const saleRef = fb.doc(fb.db,'sales', item.saleFirestoreId);
+        const saleSnap = await fb.getDoc(saleRef);
+        if(saleSnap.exists()){
+          const saleData = saleSnap.data();
+          const items = Array.isArray(saleData.items) ? [...saleData.items] : [];
+          if(items[item.itemIndex]){
+            items[item.itemIndex] = { ...items[item.itemIndex], incomplete: false, serials };
+            // Clear the sale-level hasIncomplete flag too once every line is
+            // resolved, so a reprinted DR/receipt stops showing the
+            // "Incomplete Sale" banner once nothing is actually pending.
+            const stillIncomplete = items.some(it=>it && it.incomplete);
+            await fb.updateDoc(saleRef, { items, hasIncomplete: stillIncomplete });
+          }
+        }
+      } catch(e){ console.warn('Could not sync completed item back onto the original sale:', e); }
+    }
+  }
+
+  // Keep any already-loaded copy of the sale in memory in sync too, so a
+  // receipt still open on screen reflects the change immediately.
+  const tx = SALES_LOG.find(t => t.id === item.saleId);
+  let allItemsNowComplete = false;
+  if(tx && tx.items && tx.items[item.itemIndex]){
+    tx.items[item.itemIndex].incomplete = false;
+    tx.items[item.itemIndex].serials = serials;
+    allItemsNowComplete = !tx.items.some(it=>it && it.incomplete);
+    // The sale-level hasIncomplete flag was captured once at save time; clear
+    // it once every line has been resolved so the receipt/DR's "Incomplete
+    // Sale" banner doesn't keep showing forever after everything is done.
+    // (The Firestore copy of this flag is cleared above, alongside the items
+    // array update, in the same write.)
+    if(allItemsNowComplete) tx.hasIncomplete = false;
+  }
+
+  // Also sync the paginated Sales Log chunk (used by the Sales module table)
+  // so the ⚠ INCOMPLETE badge / Edit-Complete button and the receipt's own
+  // Incomplete banner disappear without needing a manual page refresh.
+  const chunkRow = (typeof SALES_ACTIVE_CHUNK !== 'undefined' ? SALES_ACTIVE_CHUNK : []).find(t => t.firestoreId === item.saleFirestoreId);
+  if(chunkRow){
+    if(chunkRow.raw && Array.isArray(chunkRow.raw.items) && chunkRow.raw.items[item.itemIndex]){
+      chunkRow.raw.items[item.itemIndex] = { ...chunkRow.raw.items[item.itemIndex], incomplete: false, serials };
+    }
+    chunkRow.hasIncomplete = Array.isArray(chunkRow.raw?.items) && chunkRow.raw.items.some(it=>it && it.incomplete);
+    chunkRow.incompleteCount = Array.isArray(chunkRow.raw?.items) ? chunkRow.raw.items.filter(it=>it && it.incomplete).length : 0;
+    if(chunkRow.raw && !chunkRow.hasIncomplete) chunkRow.raw.hasIncomplete = false;
+    if(document.getElementById('sales-log-tbody')) renderSalesLogRecordsTable(SALES_ACTIVE_CHUNK);
+  }
+
+  // If this sale's receipt is the one currently open in the Sales module,
+  // refresh both the receipt (drops the Incomplete banner/note for this line)
+  // and the Edit/Complete panel itself (drops this line, or hides if none left).
+  if(window._viewedSaleFirestoreId === item.saleFirestoreId){
+    const modal = document.getElementById('modal-view-receipt');
+    if(modal && modal.classList.contains('active') && typeof window.viewPastSaleReceipt === 'function'){
+      window.viewPastSaleReceipt(item.saleFirestoreId);
+    }
+  }
+
+  // Same refresh, but for the just-submitted receipt still open on the Sales
+  // page itself (before the cashier navigates away) — same source of truth,
+  // just a different screen.
+  if(window._lastSubmittedSaleFirestoreId === item.saleFirestoreId && tx){
+    const wrap = document.getElementById('sales-receipt-wrap');
+    if(wrap && wrap.style.display !== 'none'){
+      renderReceipt(tx, 'receipt-body');
+      const panel = document.getElementById('receipt-incomplete-panel');
+      if(panel){
+        const remaining = INCOMPLETE_ITEMS.filter(x => x.saleId === tx.id && x.status !== 'completed');
+        if(remaining.length){
+          panel.style.display = 'block';
+          panel.innerHTML = buildIncompleteItemsPanelHTML(remaining);
+        } else {
+          panel.style.display = 'none';
+          panel.innerHTML = '';
+        }
+      }
+    }
+  }
+
+  logActivity({ text: `✅ Incomplete item completed: ${item.prodName} (qty ${item.qty}) for sale ${item.slipNo||item.saleId} — inventory deducted.`, type:'inventory', green:true });
+  renderIncompleteItemsTable();
+  refreshIncompleteItemsBadge();
+}
+
+// ── Hook into showPage, same pattern as RMA Items ──
+(function() {
+  const _prevShow = window.showPage;
+  window.showPage = function(page, el) {
+    if (typeof _prevShow === 'function') _prevShow(page, el);
+    if (page === 'incomplete') { loadIncompleteItems(); } else { unloadIncompleteItems(); }
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  END INCOMPLETE ITEMS MODULE
 // ═══════════════════════════════════════════════════════════════
 </script>
 </body>
