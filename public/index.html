@@ -3300,6 +3300,28 @@ body.app-running #screen-app   { display:flex !important; }
           </button>
         </div>
 
+        <!-- Type filter tabs: auto-classified from category/unit/name text via
+             classifyInventoryItem() — no manual tagging, so this may misclassify
+             the odd item, but keeps Products/Packages/Services one click apart. -->
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <button id="inv-type-btn-" onclick="invTypeFilter='';renderInventory()"
+            style="padding:8px 20px;cursor:pointer;font-family:var(--mono);font-size:0.78rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid var(--border2);background:var(--bg3);color:var(--text-muted);">
+            All
+          </button>
+          <button id="inv-type-btn-product" onclick="invTypeFilter='product';renderInventory()"
+            style="padding:8px 20px;cursor:pointer;font-family:var(--mono);font-size:0.78rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid var(--border2);background:var(--bg3);color:var(--text-muted);">
+            Products
+          </button>
+          <button id="inv-type-btn-package" onclick="invTypeFilter='package';renderInventory()"
+            style="padding:8px 20px;cursor:pointer;font-family:var(--mono);font-size:0.78rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid var(--border2);background:var(--bg3);color:var(--text-muted);">
+            Packages
+          </button>
+          <button id="inv-type-btn-service" onclick="invTypeFilter='service';renderInventory()"
+            style="padding:8px 20px;cursor:pointer;font-family:var(--mono);font-size:0.78rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;border:1px solid var(--border2);background:var(--bg3);color:var(--text-muted);">
+            Services
+          </button>
+        </div>
+
         <div class="pl-stats-bar" id="inv-stats"></div>
         <div id="inv-mismatch-banner" style="display:none;"></div>
 
@@ -3558,9 +3580,17 @@ body.app-running #screen-app   { display:flex !important; }
 
           <!-- Client & Meta -->
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">
-            <div class="field">
+            <div class="field" style="position:relative;">
               <label>Client / Company Name *</label>
-              <input type="text" id="qt-client" placeholder="e.g. ABC Corporation"/>
+              <input type="text" id="qt-client" placeholder="e.g. ABC Corporation" autocomplete="off"
+                oninput="onQTClientInput(this.value)"
+                onfocus="onQTClientInput(this.value)"
+                onblur="setTimeout(hideQTLeadSuggestions, 150)"/>
+              <div id="qt-lead-suggestions"
+                style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;
+                       background:var(--card,#1b1b1b);border:1px solid var(--red-border,#7f1d1d);
+                       border-top:none;max-height:220px;overflow-y:auto;box-shadow:0 8px 18px rgba(0,0,0,0.45);">
+              </div>
             </div>
             <div class="field">
               <label>Contact Person</label>
@@ -3943,6 +3973,12 @@ body.app-running #screen-app   { display:flex !important; }
             <button class="modal-close" onclick="closeLeadViewModal()">✕</button>
           </div>
           <div id="lead-view-body" style="font-size:0.84rem;"></div>
+
+          <!-- Transaction History (Sales / Quotations / RMA linked to this lead) -->
+          <div id="lead-tx-history-section" style="margin-top:14px;border-top:1px solid var(--border2);padding-top:14px;display:none;">
+            <div style="font-family:var(--mono);font-size:0.68rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;">Transaction History</div>
+            <div id="lead-tx-history-body" style="border:1px solid var(--border2);"></div>
+          </div>
 
           <!-- Activity Confirmation Strip -->
           <div id="lead-confirm-strip" style="margin-top:14px;border:1px solid var(--border2);padding:12px 16px;display:flex;align-items:center;gap:14px;background:var(--bg3);">
@@ -4820,9 +4856,17 @@ body.app-running #screen-app   { display:flex !important; }
         <label style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:6px;">Serial Number</label>
         <input type="text" id="rma-serial" placeholder="e.g. SN-2024-00123" style="width:100%;box-sizing:border-box;"/>
       </div>
-      <div>
+      <div style="position:relative;">
         <label style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:6px;">Customer Name</label>
-        <input type="text" id="rma-customer" placeholder="e.g. Juan Dela Cruz" style="width:100%;box-sizing:border-box;"/>
+        <input type="text" id="rma-customer" placeholder="e.g. Juan Dela Cruz" style="width:100%;box-sizing:border-box;" autocomplete="off"
+          oninput="onRMACustomerInput(this.value)"
+          onfocus="onRMACustomerInput(this.value)"
+          onblur="setTimeout(hideRMALeadSuggestions, 150)"/>
+        <div id="rma-lead-suggestions"
+          style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;
+                 background:var(--card,#1b1b1b);border:1px solid var(--red-border,#7f1d1d);
+                 border-top:none;max-height:220px;overflow-y:auto;box-shadow:0 8px 18px rgba(0,0,0,0.45);">
+        </div>
       </div>
       <div>
         <label style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;color:var(--text-muted);text-transform:uppercase;display:block;margin-bottom:6px;">Date Purchased</label>
@@ -6517,6 +6561,23 @@ let plFilter = '';
 let invFilter = '';
 let invStockSort = ''; // '' = default order, 'desc' = highest stock first, 'asc' = lowest stock first
 let invBranchFilter = ''; // '' = All Branches (Combined); otherwise a branch name from BRANCHES_CACHE
+let invTypeFilter = ''; // '' = All, 'product', 'package', 'service' — see classifyInventoryItem()
+
+// Auto-detects whether an item is a PRODUCT, PACKAGE, or SERVICE, purely from
+// its existing category text — no manual tagging needed. There's no separate
+// "type" field being stored; this just buckets by what's already in `category`:
+//   - category contains the literal word "service" (singular or plural, e.g.
+//     "Service" / "Services" / "IT Services")  -> service
+//   - category contains the literal word "package" (singular or plural, e.g.
+//     "Package" / "Packages")                   -> package
+//   - anything else (no other synonyms like "pkg", "bundle", "kit", "combo",
+//     "set", "lot" are accepted)                 -> product (default bucket)
+function classifyInventoryItem(p){
+  const category = `${p.category||''}`.toUpperCase();
+  if (/SERVICE/.test(category)) return 'service';
+  if (/PACKAGE/.test(category)) return 'package';
+  return 'product';
+}
 let stocksLoaded = false;
 
 // Convert a Firestore "stocks" doc into the shape used by the UI
@@ -9034,7 +9095,7 @@ function renderProductTable(px){
     (p.model||'').toLowerCase().includes(q) ||
     (p.description||'').toLowerCase().includes(q) ||
     p.id.toLowerCase().includes(q)
-  );
+  ).filter(p => px==='inv' && invTypeFilter ? classifyInventoryItem(p) === invTypeFilter : true);
   // Product Pricelist modal is browsed alphabetically rather than by
   // insertion/creation order — sort by model first (that's the primary
   // column shown), falling back to the brand name for items with no model.
@@ -9123,6 +9184,16 @@ function renderProductTable(px){
   if(px==='inv'){
     const hdr = document.getElementById('inv-stock-col-hdr');
     if(hdr) hdr.textContent = invBranchFilter ? `Stock (${invBranchFilter})` : 'Stock (All)';
+
+    // Highlight the active Products/Packages/Services tab.
+    ['', 'product', 'package', 'service'].forEach(t => {
+      const btn = document.getElementById('inv-type-btn-' + t);
+      if (!btn) return;
+      const active = invTypeFilter === t;
+      btn.style.background = active ? 'var(--red)' : 'var(--bg3)';
+      btn.style.color = active ? '#fff' : 'var(--text-muted)';
+      btn.style.borderColor = active ? 'var(--red)' : 'var(--border2)';
+    });
   }
 }
 
@@ -12140,7 +12211,7 @@ function showPage(name, el){
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   document.getElementById('topbar-page').textContent = PAGE_TITLES[name] || name.toUpperCase();
-  if(name === 'inventory'){ invFilter=''; const s=document.getElementById('inv-search'); if(s) s.value=''; document.getElementById('inv-edit-form').style.display='none'; populateInvBranchFilter(); renderInventory(); refreshTransferRequestBadge(); refreshDeleteRequestBadge(); }
+  if(name === 'inventory'){ invFilter=''; invTypeFilter=''; const s=document.getElementById('inv-search'); if(s) s.value=''; document.getElementById('inv-edit-form').style.display='none'; populateInvBranchFilter(); renderInventory(); refreshTransferRequestBadge(); refreshDeleteRequestBadge(); }
   if(name === 'purchaseorders'){ renderPOPage(); refreshPOVoidRequestBadge(); }
   if(name === 'reimbursements'){ populateReimbBranchFilter(); renderMyReimbTable(); if(currentRole==='super') renderReimbAdminTable(); }
   if(name === 'hr'){ loadHREmployees(); }
@@ -18203,6 +18274,117 @@ window.hideSaleLeadSuggestions = function() {
   if (box) { box.style.display = 'none'; box.innerHTML = ''; }
 };
 
+// Same lead-matching autocomplete as the Sales "Company Name" field, applied to
+// the RMA modal's "Customer Name" field. Selecting a suggestion writes the
+// lead's exact Company/Contact string into rma-customer, so it string-matches
+// the `customerName` field the Leads page queries (see loadLeadTransactionHistory),
+// letting the RMA item show up under that lead's Transaction History.
+window.onRMACustomerInput = function(val) {
+  const box = document.getElementById('rma-lead-suggestions');
+  if (!box) return;
+  const q = (val || '').trim();
+  if (!q) { hideRMALeadSuggestions(); return; }
+
+  ensureLeadsNameCache().then(() => {
+    const qLower = q.toLowerCase();
+    const matches = LEADS_NAME_CACHE.filter(l => {
+      const name = (l.company || l.contact || '').toLowerCase();
+      return name.includes(qLower);
+    }).slice(0, 8);
+
+    if (!matches.length) { hideRMALeadSuggestions(); return; }
+
+    box.innerHTML = matches.map(l => {
+      const name   = l.company || l.contact || 'Unnamed Lead';
+      const sub    = [l.contact && l.company ? l.contact : '', l.phone || '', l.status ? l.status.toUpperCase() : '']
+                       .filter(Boolean).join(' · ');
+      return `
+        <div class="lead-suggestion-item" data-lead-id="${_escapeHtml(l.id)}"
+          onmousedown="event.preventDefault(); selectRMALeadSuggestion('${l.id}')"
+          style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border2,#333);font-family:var(--sans);font-size:0.85rem;"
+          onmouseover="this.style.background='var(--red-dim,rgba(127,29,29,0.25))'"
+          onmouseout="this.style.background='transparent'">
+          <div style="color:var(--text,#eee);">◈ ${_highlightMatch(name, q)}</div>
+          ${sub ? `<div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted,#999);margin-top:2px;">${_escapeHtml(sub)} — matched in LEADS</div>` : `<div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted,#999);margin-top:2px;">matched in LEADS</div>`}
+        </div>`;
+    }).join('');
+    box.style.display = 'block';
+  });
+};
+
+window.selectRMALeadSuggestion = function(leadId) {
+  const lead = LEADS_NAME_CACHE.find(l => l.id === leadId);
+  if (!lead) { hideRMALeadSuggestions(); return; }
+  const nameField = document.getElementById('rma-customer');
+  if (nameField) nameField.value = lead.company || lead.contact || '';
+  hideRMALeadSuggestions();
+  showToast('Matched registered lead: ' + (lead.company || lead.contact));
+};
+
+window.hideRMALeadSuggestions = function() {
+  const box = document.getElementById('rma-lead-suggestions');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+};
+
+// Same lead-matching autocomplete as the Sales/RMA customer fields, applied to
+// the Quotation modal's "Client / Company Name" field. Selecting a suggestion
+// writes the lead's exact Company/Contact string into qt-client, so it
+// string-matches the `client` field the Leads page queries (see
+// loadLeadTransactionHistory), letting the quotation show up under that lead's
+// Transaction History.
+window.onQTClientInput = function(val) {
+  const box = document.getElementById('qt-lead-suggestions');
+  if (!box) return;
+  const q = (val || '').trim();
+  if (!q) { hideQTLeadSuggestions(); return; }
+
+  ensureLeadsNameCache().then(() => {
+    const qLower = q.toLowerCase();
+    const matches = LEADS_NAME_CACHE.filter(l => {
+      const name = (l.company || l.contact || '').toLowerCase();
+      return name.includes(qLower);
+    }).slice(0, 8);
+
+    if (!matches.length) { hideQTLeadSuggestions(); return; }
+
+    box.innerHTML = matches.map(l => {
+      const name   = l.company || l.contact || 'Unnamed Lead';
+      const sub    = [l.contact && l.company ? l.contact : '', l.phone || '', l.status ? l.status.toUpperCase() : '']
+                       .filter(Boolean).join(' · ');
+      return `
+        <div class="lead-suggestion-item" data-lead-id="${_escapeHtml(l.id)}"
+          onmousedown="event.preventDefault(); selectQTLeadSuggestion('${l.id}')"
+          style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border2,#333);font-family:var(--sans);font-size:0.85rem;"
+          onmouseover="this.style.background='var(--red-dim,rgba(127,29,29,0.25))'"
+          onmouseout="this.style.background='transparent'">
+          <div style="color:var(--text,#eee);">◈ ${_highlightMatch(name, q)}</div>
+          ${sub ? `<div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted,#999);margin-top:2px;">${_escapeHtml(sub)} — matched in LEADS</div>` : `<div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted,#999);margin-top:2px;">matched in LEADS</div>`}
+        </div>`;
+    }).join('');
+    box.style.display = 'block';
+  });
+};
+
+window.selectQTLeadSuggestion = function(leadId) {
+  const lead = LEADS_NAME_CACHE.find(l => l.id === leadId);
+  if (!lead) { hideQTLeadSuggestions(); return; }
+  const nameField = document.getElementById('qt-client');
+  if (nameField) nameField.value = lead.company || lead.contact || '';
+  const contactField = document.getElementById('qt-contact');
+  if (contactField && !contactField.value) contactField.value = lead.contact || '';
+  const emailField = document.getElementById('qt-email');
+  if (emailField && !emailField.value) emailField.value = lead.email || '';
+  const phoneField = document.getElementById('qt-client-phone');
+  if (phoneField && !phoneField.value) phoneField.value = lead.phone || '';
+  hideQTLeadSuggestions();
+  showToast('Matched registered lead: ' + (lead.company || lead.contact));
+};
+
+window.hideQTLeadSuggestions = function() {
+  const box = document.getElementById('qt-lead-suggestions');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+};
+
 // Populates the Generate Purchase Order and Generate Sales branch selects using ONLY
 // branches that exist in BRANCHES_CACHE (i.e. branches actually created/saved in Firestore).
 function syncPOAndSalesBranchSelects() {
@@ -21243,6 +21425,188 @@ window.viewLead = function(id) {
   if (lostBtn)    lostBtn.style.display    = (canEdit && status !== 'lost') ? '' : 'none';
   document.getElementById('modal-lead-view').classList.add('active');
   loadLeadConfirmation(id);
+  loadLeadTransactionHistory(lead);
+};
+
+// ── Lead Transaction History ──
+// Leads don't carry a stored reference (no leadId) on sales/quotations/RMA
+// records — customer info is only ever copied by name at creation time (see
+// selectSaleLeadSuggestion above). So we look these up live by matching the
+// lead's Company and Contact Person against the `customer` field on sales,
+// `client` on quotations, and `customerName` on RMA items. Runs a fresh
+// one-off query every time the modal opens (not the paginated page caches),
+// so it finds matches regardless of what pages have been visited.
+let _leadTxToken = 0; // guards against a stale/slow query overwriting a newer one
+window._LEAD_TX_CACHE = {}; // firestoreId -> raw doc data, keyed by type, so click-through can open the real record
+
+async function loadLeadTransactionHistory(lead) {
+  const section = document.getElementById('lead-tx-history-section');
+  const body    = document.getElementById('lead-tx-history-body');
+  if (!section || !body) return;
+
+  const terms = [...new Set([lead.company, lead.contact].map(s => (s || '').trim()).filter(Boolean))];
+  if (!terms.length) { section.style.display = 'none'; return; }
+
+  const myToken = ++_leadTxToken;
+  section.style.display = '';
+  body.innerHTML = `<div style="padding:14px;text-align:center;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">LOADING LINKED TRANSACTIONS…</div>`;
+
+  const fb = window._fb;
+  if (!fb) { body.innerHTML = `<div style="padding:14px;text-align:center;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">Firebase not ready.</div>`; return; }
+
+  try {
+    const results = [];
+    const seen = { sale: new Set(), quotation: new Set(), rma: new Set() };
+
+    for (const term of terms) {
+      const [salesSnap, qtSnap, rmaSnap] = await Promise.all([
+        fb.getDocs(fb.query(fb.collection(fb.db, 'sales'),      fb.where('customer', '==', term))).catch(() => null),
+        fb.getDocs(fb.query(fb.collection(fb.db, 'quotations'), fb.where('client',   '==', term))).catch(() => null),
+        fb.getDocs(fb.query(fb.collection(fb.db, 'rmaItems'),   fb.where('customerName', '==', term))).catch(() => null),
+      ]);
+
+      (salesSnap?.docs || []).forEach(d => {
+        if (seen.sale.has(d.id)) return;
+        seen.sale.add(d.id);
+        const data = d.data();
+        window._LEAD_TX_CACHE[d.id] = data;
+        results.push({
+          type: 'sale', firestoreId: d.id,
+          ref: data.txId || data.transactionId || data.id || d.id.substring(0,7).toUpperCase(),
+          date: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null),
+          amount: parseFloat(data.total) || parseFloat(data.grandTotal) || 0,
+          statusLabel: data.voided ? 'VOIDED' : (parseFloat(data.amountPaid)||0) >= (parseFloat(data.total)||0) ? 'PAID' : 'UNPAID',
+          statusColor: data.voided ? '#b71c1c' : ((parseFloat(data.amountPaid)||0) >= (parseFloat(data.total)||0) ? '#2e7d32' : '#f57c00'),
+        });
+      });
+
+      (qtSnap?.docs || []).forEach(d => {
+        if (seen.quotation.has(d.id)) return;
+        seen.quotation.add(d.id);
+        const data = d.data();
+        window._LEAD_TX_CACHE[d.id] = data;
+        const qtStatusColors = { draft:'#424242', pending:'#f57c00', approved:'#2e7d32', rejected:'#b71c1c', voided:'#6a1a6a' };
+        results.push({
+          type: 'quotation', firestoreId: d.id,
+          ref: data.quoteId || d.id.substring(0,7).toUpperCase(),
+          date: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null),
+          amount: parseFloat(data.total) || (Array.isArray(data.items) ? data.items.reduce((s,it)=> s + (parseFloat(it.lineTotal) || (parseFloat(it.qty)||0)*(parseFloat(it.unitPrice)||0)), 0) : 0),
+          statusLabel: (data.status || 'draft').toUpperCase(),
+          statusColor: qtStatusColors[data.status] || '#555',
+        });
+      });
+
+      (rmaSnap?.docs || []).forEach(d => {
+        if (seen.rma.has(d.id)) return;
+        seen.rma.add(d.id);
+        const data = d.data();
+        window._LEAD_TX_CACHE[d.id] = data;
+        const rmaStatusColors = { pending:'#f57c00', approved:'#2e7d32', rejected:'#b71c1c', voided:'#6a1a6a' };
+        results.push({
+          type: 'rma', firestoreId: d.id,
+          ref: (data.model || 'RMA') + (data.serialNumber ? ' · ' + data.serialNumber : ''),
+          date: data.rmaDate ? new Date(data.rmaDate) : null,
+          amount: null,
+          statusLabel: (data.status || 'pending').toUpperCase(),
+          statusColor: rmaStatusColors[data.status] || '#555',
+        });
+      });
+    }
+
+    if (myToken !== _leadTxToken) return; // a newer lead was opened while this was in flight
+
+    if (!results.length) {
+      body.innerHTML = `<div style="padding:14px;text-align:center;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">No sales, quotations, or RMA records found for this lead yet.</div>`;
+      return;
+    }
+
+    results.sort((a,b) => (b.date?.getTime()||0) - (a.date?.getTime()||0));
+
+    const typeLabel = { sale: 'SALE', quotation: 'QUOTATION', rma: 'RMA' };
+    const typeColor = { sale: 'var(--red)', quotation: '#2e7dd0', rma: '#9333ea' };
+    const fmtD = d => d ? d.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—';
+    const fmtP = n => '₱' + Number(n||0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+
+    body.innerHTML = results.map((r,i) => `
+      <div onclick="openLeadLinkedTx('${r.type}','${r.firestoreId}')"
+        style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;${i < results.length-1 ? 'border-bottom:1px solid var(--border2);' : ''}"
+        onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+        <span style="font-family:var(--mono);font-size:0.6rem;font-weight:700;letter-spacing:0.06em;padding:3px 7px;border:1px solid ${typeColor[r.type]};color:${typeColor[r.type]};flex-shrink:0;">${typeLabel[r.type]}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:0.82rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.ref}</div>
+          <div style="font-family:var(--mono);font-size:0.65rem;color:var(--text-muted);margin-top:2px;">${fmtD(r.date)}</div>
+        </div>
+        ${r.amount !== null ? `<div style="font-family:var(--mono);font-size:0.78rem;font-weight:600;white-space:nowrap;">${fmtP(r.amount)}</div>` : ''}
+        <span style="font-family:var(--mono);font-size:0.6rem;font-weight:700;letter-spacing:0.06em;color:${r.statusColor};white-space:nowrap;">${r.statusLabel}</span>
+      </div>`).join('');
+  } catch (err) {
+    console.error('Lead transaction history load error:', err);
+    if (myToken !== _leadTxToken) return;
+    body.innerHTML = `<div style="padding:14px;text-align:center;font-family:var(--mono);font-size:0.72rem;color:var(--red);">Failed to load linked transactions — ${err.message||err}</div>`;
+  }
+}
+
+// Opens the real record from a Transaction History row. Sales and quotations
+// reuse their existing view modals (injecting the record into the relevant
+// active-chunk array first if it isn't already loaded there, since this
+// record may live outside whatever page is currently paginated in). RMA has
+// no standalone view modal, so its row just expands its detail inline.
+window.openLeadLinkedTx = async function(type, firestoreId) {
+  const data = window._LEAD_TX_CACHE[firestoreId];
+  if (!data) { showToast('Could not locate that record.'); return; }
+
+  if (type === 'sale') {
+    if (!window.SALES_ACTIVE_CHUNK) window.SALES_ACTIVE_CHUNK = [];
+    if (!SALES_ACTIVE_CHUNK.some(t => t.firestoreId === firestoreId)) {
+      SALES_ACTIVE_CHUNK.unshift({
+        id: firestoreId, firestoreId,
+        txId: data.txId || data.transactionId || data.id || firestoreId.substring(0,7).toUpperCase(),
+        customer: data.customerName || data.customer || 'Walk-In Customer',
+        branch: data.branch || 'Central Store',
+        soldBy: data.soldBy || data.staffName || data.salesperson || 'Staff',
+        subtotal: parseFloat(data.subtotal) || 0,
+        vat: parseFloat(data.vat) || 0,
+        total: parseFloat(data.total) || parseFloat(data.grandTotal) || 0,
+        amountPaid: parseFloat(data.amountPaid) || 0,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+        voided: !!data.voided,
+        voidedAt: data.voidedAt?.toDate ? data.voidedAt.toDate() : null,
+        voidedBy: data.voidedBy || '',
+        voidReason: data.voidReason || '',
+        hasIncomplete: Array.isArray(data.items) && data.items.some(it => it && it.incomplete),
+        incompleteCount: Array.isArray(data.items) ? data.items.filter(it => it && it.incomplete).length : 0,
+        raw: data
+      });
+    }
+    closeLeadViewModal();
+    viewPastSaleReceipt(firestoreId);
+    return;
+  }
+
+  if (type === 'quotation') {
+    if (!QT_ACTIVE_CHUNK.some(q => q.id === firestoreId)) {
+      QT_ACTIVE_CHUNK.unshift({ id: firestoreId, ...data });
+    }
+    closeLeadViewModal();
+    await viewQuotation(firestoreId);
+    return;
+  }
+
+  // RMA — no dedicated view modal in this app; show a compact inline detail.
+  const fmtD2 = v => v ? new Date(v).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—';
+  alert(
+    `RMA RECORD\n\n` +
+    `Model: ${data.model || '—'}\n` +
+    `Serial: ${data.serialNumber || '—'}\n` +
+    `Customer: ${data.customerName || '—'}\n` +
+    `Supplier: ${data.supplier || '—'}\n` +
+    `RMA Date: ${fmtD2(data.rmaDate)}\n` +
+    `Purchase Date: ${fmtD2(data.purchaseDate)}\n` +
+    `Return Date: ${fmtD2(data.returnDate)}\n` +
+    `Status: ${(data.status || 'pending').toUpperCase()}\n` +
+    `Actions Taken: ${data.actionsTaken || '—'}\n\n` +
+    `Open the RMA page to edit or review this item.`
+  );
 };
 
 // Shows one of the current user's own pending/rejected lead requests —
@@ -21298,6 +21662,8 @@ window.viewLeadRequest = function(reqId) {
   if (editBtn)    editBtn.style.display    = 'none';
   if (convertBtn) convertBtn.style.display = 'none';
   if (lostBtn)    lostBtn.style.display    = 'none';
+  const txSection = document.getElementById('lead-tx-history-section');
+  if (txSection) txSection.style.display = 'none'; // not a real lead yet — nothing to link
   document.getElementById('modal-lead-view').classList.add('active');
 };
 
