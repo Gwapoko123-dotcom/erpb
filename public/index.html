@@ -1995,7 +1995,7 @@ body.app-running #screen-app   { display:flex !important; }
     <div class="topbar-right">
       <select id="tb-print-header" onchange="setPrintHeaderChoice(this.value)" title="Company header used on every printed document" style="font-family:var(--mono);font-size:0.65rem;background:transparent;border:1px solid var(--border2);color:var(--text);padding:4px 8px;cursor:pointer;">
         <option value="jcptech">Header: JCPTECH</option>
-        <option value="jht">Header: JHT TECH-SERVE</option>
+        <option value="jht">Header: TEKNOSERVE I.T. SERVICES</option>
       </select>
       <span class="topbar-user" id="tb-user">juan</span>
       <div class="topbar-role" id="tb-role">SUPERADMIN</div>
@@ -3263,6 +3263,11 @@ body.app-running #screen-app   { display:flex !important; }
           <select id="inv-branch-filter" onchange="onInvBranchFilterChange(this.value)"
             style="background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.78rem;font-family:var(--mono);outline:none;min-width:170px;">
             <option value="">— All Branches (Combined) —</option>
+          </select>
+          <select id="inv-stock-branch-filter" onchange="invStockBranchFilter=this.value;renderInventory()"
+            title="Only show items that actually have stock at the selected branch"
+            style="background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.78rem;font-family:var(--mono);outline:none;min-width:190px;">
+            <option value="">Branch Stock List: All Items</option>
           </select>
           <select id="inv-stock-sort" onchange="invStockSort=this.value;renderInventory()"
             style="background:var(--bg3);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.78rem;font-family:var(--mono);outline:none;min-width:170px;">
@@ -5083,8 +5088,12 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <button onclick="addSalesLine()"
-        style="margin-top:8px;background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;">
-        + Add Item
+        style="margin-top:8px;background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;" title="Pick a stocked product from Inventory">
+        + Add Products
+      </button>
+      <button onclick="addSalesPackageLine()"
+        style="margin-top:8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.4);color:#a855f7;padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;" title="Pick a package (items classified as Package in Inventory)">
+        + Add Package
       </button>
       <button onclick="addSalesServiceLine()"
         style="margin-top:8px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.4);color:#3b82f6;padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;" title="Non-stock line — manually priced, never deducts Inventory">
@@ -6561,6 +6570,7 @@ let plFilter = '';
 let invFilter = '';
 let invStockSort = ''; // '' = default order, 'desc' = highest stock first, 'asc' = lowest stock first
 let invBranchFilter = ''; // '' = All Branches (Combined); otherwise a branch name from BRANCHES_CACHE
+let invStockBranchFilter = ''; // '' = show all items; otherwise a branch name — only items with actual (>0) stock at that branch are shown
 let invTypeFilter = ''; // '' = All, 'product', 'package', 'service' — see classifyInventoryItem()
 
 // Auto-detects whether an item is a PRODUCT, PACKAGE, or SERVICE, purely from
@@ -6964,7 +6974,15 @@ function closeSalesModal(){
 }
 
 function addSalesLine(){
-  salesItems.push({ prodId:'', qty:1, unitPrice:0, disc:0, serials:[] });
+  salesItems.push({ prodId:'', qty:1, unitPrice:0, disc:0, serials:[], itemType:'product' });
+  renderSalesLines();
+  updateSalesTotals();
+}
+// Package line — same product lookup as a regular item, but the search box
+// is restricted to items classified as 'package' (see classifyInventoryItem())
+// so staff can't accidentally mix a package into a plain product row.
+function addSalesPackageLine(){
+  salesItems.push({ prodId:'', qty:1, unitPrice:0, disc:0, serials:[], itemType:'package' });
   renderSalesLines();
   updateSalesTotals();
 }
@@ -7012,13 +7030,18 @@ function removeSalesLine(idx){
 // so all existing price/stock/serial logic keeps working unchanged.
 let _prodSuggestOwner = null; // key of the input currently "owning" the shared portal
 
-function renderProdSuggestions(ownerKey, inputEl, query, onPick, branch){
+function renderProdSuggestions(ownerKey, inputEl, query, onPick, branch, typeFilter){
   const box = document.getElementById('prod-suggest-portal');
   if(!box || !inputEl) return;
   _prodSuggestOwner = ownerKey;
 
   const q = (query || '').trim().toLowerCase();
-  const list = PRICELIST || [];
+  // Restrict to one classification (product/package/service) when the row
+  // that opened this picker is type-specific — e.g. a "+ Add Package" line
+  // should only ever suggest items classified as a package. Rows with no
+  // typeFilter (older/loaded data) keep searching the full list.
+  const baseList = (PRICELIST || []).filter(p => !typeFilter || classifyInventoryItem(p) === typeFilter);
+  const list = baseList;
   // No cap here — the dropdown scrolls (see the portal's overflow-y:auto),
   // so every matching product should be reachable, not just the first N.
   const matches = q
@@ -7031,7 +7054,8 @@ function renderProdSuggestions(ownerKey, inputEl, query, onPick, branch){
     : list;
 
   if(!matches.length){
-    box.innerHTML = `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted);font-family:var(--mono);">No matching items</div>`;
+    const typeNote = typeFilter ? ` (${typeFilter}s only)` : '';
+    box.innerHTML = `<div style="padding:8px 12px;font-size:0.78rem;color:var(--text-muted);font-family:var(--mono);">No matching items${typeNote}</div>`;
   } else {
     box.innerHTML = matches.map(p=>{
       // If a branch is selected on the form, show THAT branch's stock —
@@ -7075,7 +7099,8 @@ function hideProdSuggestions(ownerKey){
 }
 function filterSalesProdSuggestions(idx, inputEl){
   const branch = document.getElementById('sale-branch')?.value || '';
-  renderProdSuggestions('sales-'+idx, inputEl, inputEl.value, (prodId)=> onSalesProdChange(idx, prodId), branch);
+  const typeFilter = salesItems[idx] ? salesItems[idx].itemType : null;
+  renderProdSuggestions('sales-'+idx, inputEl, inputEl.value, (prodId)=> onSalesProdChange(idx, prodId), branch, typeFilter);
 }
 function filterPOProdSuggestions(idx, inputEl){
   renderProdSuggestions('po-'+idx, inputEl, inputEl.value, (prodId)=> onPOProdChange(idx, prodId));
@@ -7095,7 +7120,7 @@ window.addEventListener('resize', ()=>{ if(_prodSuggestOwner) hideProdSuggestion
 function renderSalesLines(){
   const tbody = document.getElementById('sales-lines-body');
   if(!salesItems.length){
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">NO ITEMS — CLICK "+ ADD ITEM" BELOW</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">NO ITEMS — USE "+ ADD PRODUCTS", "+ ADD PACKAGE" OR "+ ADD SERVICE" BELOW</td></tr>`;
     return;
   }
   tbody.innerHTML = salesItems.map((item,i) => {
@@ -7163,13 +7188,17 @@ function renderSalesLines(){
         </div>`;
       }
     }
-    return `<tr>
+    const isPkgLine = item.itemType === 'package';
+    const searchPlaceholder = isPkgLine ? 'Type to search packages…' : 'Type to search…';
+    const pkgBadge = isPkgLine ? `<span style="display:block;margin-top:4px;font-family:var(--mono);font-size:0.58rem;letter-spacing:0.05em;color:#a855f7;">PACKAGE</span>` : '';
+    return `<tr${isPkgLine ? ' style="background:rgba(168,85,247,0.04);"' : ''}>
       <td style="position:relative;">
-        <input type="text" autocomplete="off" placeholder="Type to search…" value="${prodLabel}"
-          style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:6px 8px;font-size:0.78rem;color:var(--text);outline:none;"
+        <input type="text" autocomplete="off" placeholder="${searchPlaceholder}" value="${prodLabel}"
+          style="width:100%;background:var(--bg3);border:1px solid ${isPkgLine?'rgba(168,85,247,0.35)':'var(--border2)'};padding:6px 8px;font-size:0.78rem;color:var(--text);outline:none;"
           oninput="filterSalesProdSuggestions(${i}, this)"
           onfocus="filterSalesProdSuggestions(${i}, this)"
           onblur="setTimeout(function(){hideProdSuggestions('sales-${i}');},150)"/>
+        ${pkgBadge}
       </td>
       <td><input type="number" min="1" value="${item.qty}"
         style="width:64px;background:var(--bg3);border:1px solid var(--border2);padding:6px 8px;font-size:0.78rem;color:var(--text);text-align:right;outline:none;"
@@ -7373,9 +7402,9 @@ const COMPANY_HEADERS = {
     contact: 'Tel. No.: 331-3005 | Mobile No.: 09543848584 / 09955194254 | Email: info.jcptech.it.services@gmail.com'
   },
   jht: {
-    name:    'JHT TECH-SERVE I.T. SOLUTIONS',
+    name:    'TEKNOSERVE I.T. SERVICES',
     address: 'Door 13G, Unotres Realty Inc., Singao Road, Poblacion, Kidapawan City',
-    contact: 'Tel. No.: (064) 577 7521 Mobile No.: 09369916429 / 09917293672 Email: info.jht.technology.solutions@gmail.com'
+    contact: 'Tel. No.: (064) 521 3263 Mobile No.: 09369916429 Email: info.teknoserve@gmail.com'
   }
 };
 let PRINT_HEADER_CHOICE = 'jcptech';
@@ -9095,7 +9124,14 @@ function renderProductTable(px){
     (p.model||'').toLowerCase().includes(q) ||
     (p.description||'').toLowerCase().includes(q) ||
     p.id.toLowerCase().includes(q)
-  ).filter(p => px==='inv' && invTypeFilter ? classifyInventoryItem(p) === invTypeFilter : true);
+  ).filter(p => px==='inv' && invTypeFilter ? classifyInventoryItem(p) === invTypeFilter : true)
+   // "Branch Stock List" dropdown (separate from the Branch view filter above):
+   // when set, only show items that actually have stock (>0) at that branch.
+   // Unlimited-stock items (stock===999) always qualify since they're not tied
+   // to physical stock. This is independent of invBranchFilter, so the admin
+   // can still switch the stock column to a branch view (invBranchFilter) while
+   // choosing to see zero-stock items too.
+   .filter(p => (px==='inv' && invStockBranchFilter) ? (p.stock === 999 || (p.branches && (parseInt(p.branches[invStockBranchFilter])||0) > 0)) : true);
   // Product Pricelist modal is browsed alphabetically rather than by
   // insertion/creation order — sort by model first (that's the primary
   // column shown), falling back to the brand name for items with no model.
@@ -9154,7 +9190,7 @@ function renderProductTable(px){
       </td>
     </tr>`;
   }).join('') :
-    `<tr><td colspan="${px==='inv'?9:10}" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">NO ITEMS MATCH</td></tr>`;
+    `<tr><td colspan="${px==='inv'?9:10}" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">${(px==='inv' && invStockBranchFilter) ? `NO STOCK AT ${invStockBranchFilter.toUpperCase()}` : 'NO ITEMS MATCH'}</td></tr>`;
 
   // ── Inventory-page banner: surface it up top too, not just as a per-row
   // badge, so a mismatch can't be missed just because it's scrolled off-screen.
@@ -9293,6 +9329,28 @@ function populateInvBranchFilter(){
       names.map(nm => `<option value="${nm}">${nm}</option>`).join('');
     if(names.includes(current)) sel.value = current;
     else invBranchFilter = ''; // selected branch no longer exists — fall back to combined
+  };
+  fill();
+  if(!BRANCHES_CACHE.length){
+    ensureBranchesCacheLoaded().then(fill);
+  }
+}
+
+// Fills the "Branch Stock List" <select> on the Inventory page — a filter
+// separate from the branch view dropdown above. Choosing a branch here hides
+// items with zero stock at that branch instead of just relabeling the Stock
+// column, so it stays independent from invBranchFilter: an admin can view
+// combined totals while still filtering to "has stock at Branch X", or vice versa.
+function populateInvStockBranchFilter(){
+  const sel = document.getElementById('inv-stock-branch-filter');
+  if(!sel) return;
+  const fill = () => {
+    const names = BRANCHES_CACHE.map(b=>b.name).filter(Boolean);
+    const current = sel.value; // preserve selection across refreshes
+    sel.innerHTML = '<option value="">Branch Stock List: All Items</option>' +
+      names.map(nm => `<option value="${nm}">${nm} — In Stock Only</option>`).join('');
+    if(names.includes(current)) sel.value = current;
+    else invStockBranchFilter = ''; // selected branch no longer exists — fall back to all items
   };
   fill();
   if(!BRANCHES_CACHE.length){
@@ -10926,6 +10984,17 @@ function renderPOReconciliationModal(){
         } else if(row.status === 'legacy'){
           action = `<button onclick="applyPOReconciliationFix('${row.key}', true)" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#f59e0b;padding:3px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);margin-bottom:4px;">ACCEPT BASELINE</button>
             ${row.legacyDelta !== 0 ? `<br><button onclick="applyPOReconciliationFix('${row.key}', false, true)" style="background:rgba(239,83,80,0.08);border:1px solid rgba(239,83,80,0.3);color:#ef5350;padding:3px 10px;cursor:pointer;font-size:0.62rem;font-family:var(--mono);margin-top:4px;">FORCE SYNC TO PO TOTAL (${row.legacyDelta>0?'+':''}${row.legacyDelta})</button>${branchNote}` : ''}`;
+        } else if(row.status === 'ok' && row.inv && row.inv.hasSerials && row.legacyDelta > 0){
+          // Ledger says every counted PO was applied (hence MATCH), but the
+          // item's on-hand stock is still short of the PO total. Since the
+          // ledger already agrees with the PO total, this isn't the normal
+          // "some already sold" case — the units simply never made it into
+          // the pending pool (a receiving write likely logged the ledger
+          // entry but didn't credit pendingQty). Offer the same pending-pool
+          // credit used for legacy items so the missing units become visible
+          // as "awaiting serial numbers" instead of vanishing under MATCH.
+          action = `<button onclick="applyPOReconciliationFix('${row.key}', false, true)" style="background:rgba(239,83,80,0.08);border:1px solid rgba(239,83,80,0.3);color:#ef5350;padding:3px 10px;cursor:pointer;font-size:0.62rem;font-family:var(--mono);">ADD ${row.legacyDelta} TO PENDING POOL</button>${branchNote}
+            <div style="margin-top:4px;font-size:0.6rem;color:var(--text-muted);max-width:160px;">on-hand (${row.currentStock}) is short of PO total (${row.expected}) — not explained by a sale</div>`;
         }
         const poChips = (row.poRefs||[]).slice().sort((a,b)=> new Date(b.po.date||0) - new Date(a.po.date||0)).map(r=>{
           const counted = r.counted;
@@ -10990,6 +11059,66 @@ async function applyPOReconciliationFix(key, isBaseline, forceLegacy){
     const delta = row.legacyDelta;
     if(!delta){ showToast('Nothing to fix — already matches current stock.'); return; }
     const mostRecentBranch = _poReconMostRecentBranch(row.poRefs);
+
+    // Serial-tracked items don't trust inv.stock/inv.branches as ground truth —
+    // syncSerializedStockFromFirestore() (the self-heal) recomputes both of
+    // those from the live serials subcollection PLUS pendingQty/pendingBranches
+    // on every resync, silently overwriting any raw stock delta we write here.
+    // So for these items the only durable fix is to adjust the PENDING pool
+    // (units received but not yet serialized) instead of stock directly —
+    // that's what actually survives the resync and shows up as "awaiting
+    // serial numbers" for the admin to serialize from the Serial Detail page.
+    if(inv.hasSerials){
+      const prevPendingQty = parseInt(inv.pendingQty) || 0;
+      const prevPendingBranches = inv.pendingBranches ? {...inv.pendingBranches} : {};
+
+      if(delta > 0){
+        if(!confirm(`"${inv.name}" is serial-tracked, so stock can't be forced directly — it's always derived from actual serial numbers.\n\nInstead, this will mark ${delta} unit(s) as received-but-unserialized ("pending") at ${mostRecentBranch}, matching the PO total (${row.expected}). You'll need to open the item and add ${delta} serial number(s) to fully complete the sync.\n\nProceed?`)) return;
+
+        inv.pendingQty = prevPendingQty + delta;
+        inv.pendingBranches = {...prevPendingBranches};
+        inv.pendingBranches[mostRecentBranch] = Math.max(0, (parseInt(inv.pendingBranches[mostRecentBranch])||0) + delta);
+      } else {
+        // Negative delta: can only be absorbed by shrinking existing pending
+        // units (never-yet-serialized units simply not being expected anymore).
+        // We can't auto-remove already-serialized units — that requires picking
+        // which specific serial(s) to retire, which only a human should decide.
+        const pendingAtBranch = parseInt(prevPendingBranches[mostRecentBranch]) || 0;
+        const need = -delta;
+        const reducible = Math.min(need, pendingAtBranch, prevPendingQty);
+        if(reducible < need){
+          showToast(`⚠ Can't fully force-sync: only ${reducible} pending (unserialized) unit(s) available to remove at ${mostRecentBranch}, but ${need} fewer are needed. The remaining ${need-reducible} would require manually removing already-serialized unit(s) via the Serial Detail page — this tool won't do that automatically.`, 8000);
+          if(reducible <= 0) return;
+          if(!confirm(`Remove the ${reducible} pending (unserialized) unit(s) that CAN be safely taken back, leaving the rest of the mismatch unresolved?`)) return;
+        } else {
+          if(!confirm(`"${inv.name}" is serial-tracked. This will remove ${reducible} pending (unserialized) unit(s) at ${mostRecentBranch} to match the PO total (${row.expected}). Proceed?`)) return;
+        }
+        inv.pendingQty = Math.max(0, prevPendingQty - reducible);
+        inv.pendingBranches = {...prevPendingBranches};
+        inv.pendingBranches[mostRecentBranch] = Math.max(0, pendingAtBranch - reducible);
+      }
+
+      inv.poHistory = [...prevHistory, ...countedRefs.filter(r=>!alreadyLedgered.has(r.po.firestoreId||r.po.id)).map(r=>({
+        poId: r.po.firestoreId||r.po.id, poDisplayId: r.po.id, action:'approve', branch:r.branch, qtyExpected:r.qty, qtyApplied:r.qty, ts:new Date().toISOString(), note:'backfilled by force-sync (pending pool, serial-tracked)'
+      }))];
+
+      if(fb && !String(inv.id).startsWith('local')){
+        try {
+          await fb.updateDoc(fb.doc(fb.db,'stocks', inv.id), { pendingQty: inv.pendingQty, pendingBranches: inv.pendingBranches, poHistory: inv.poHistory });
+        } catch(e){
+          inv.pendingQty = prevPendingQty; inv.pendingBranches = prevPendingBranches; inv.poHistory = prevHistory;
+          showToast(`⚠ Could not save correction: ${e.code||e.message}`, 6000);
+          return;
+        }
+      }
+      logActivity({ text: `PO↔Inventory: ${inv.name} pending pool force-synced toward PO total (${delta>0?'+':''}${delta})`, type:'inventory', green:true });
+      showToast(delta>0 ? `✓ ${delta} pending unit(s) added for ${inv.name} — add serial number(s) to complete.` : `✓ Pending pool adjusted for ${inv.name}.`, 5000);
+      const invPage = document.getElementById('page-inventory');
+      if(invPage && invPage.classList.contains('active')) renderInventory();
+      renderPOReconciliationModal();
+      return;
+    }
+
     if(!confirm(`Force "${inv.name}" stock by ${delta>0?'+':''}${delta} unit(s) to match the Purchase Order total (${row.expected})?\n\nThis compares against CURRENT ON-HAND stock (${row.currentStock}), which is only a reliable signal if this item hasn't had unrelated sales/transfers since. Proceed only if you're confident that's the case.\n\nThe adjustment will be posted to: ${mostRecentBranch} (the branch of the most recently dated counted PO).`)) return;
 
     inv.stock = Math.max(0, (inv.stock||0) + delta);
@@ -12211,7 +12340,7 @@ function showPage(name, el){
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   document.getElementById('topbar-page').textContent = PAGE_TITLES[name] || name.toUpperCase();
-  if(name === 'inventory'){ invFilter=''; invTypeFilter=''; const s=document.getElementById('inv-search'); if(s) s.value=''; document.getElementById('inv-edit-form').style.display='none'; populateInvBranchFilter(); renderInventory(); refreshTransferRequestBadge(); refreshDeleteRequestBadge(); }
+  if(name === 'inventory'){ invFilter=''; invTypeFilter=''; const s=document.getElementById('inv-search'); if(s) s.value=''; document.getElementById('inv-edit-form').style.display='none'; populateInvBranchFilter(); populateInvStockBranchFilter(); renderInventory(); refreshTransferRequestBadge(); refreshDeleteRequestBadge(); }
   if(name === 'purchaseorders'){ renderPOPage(); refreshPOVoidRequestBadge(); }
   if(name === 'reimbursements'){ populateReimbBranchFilter(); renderMyReimbTable(); if(currentRole==='super') renderReimbAdminTable(); }
   if(name === 'hr'){ loadHREmployees(); }
@@ -17034,19 +17163,54 @@ function openBranchStockEdit() {
   const p = PRICELIST.find(x => x.id === _invDetailId);
   if (!p) return;
 
+  const inputsEl = document.getElementById('inv-d-branch-inputs');
+
+  // Serial-tracked items: per-branch counts are recomputed from the live
+  // serials subcollection every time the app loads (see
+  // syncSerializedStockFromFirestore), so it's the actual source of truth.
+  // Letting someone type a raw number here used to silently get overwritten
+  // back to the real serial count on the very next reload, which looked like
+  // "my edit didn't save." Point them at the tools that actually change the
+  // underlying serials instead.
+  if (p.hasSerials) {
+    inputsEl.innerHTML = `<div style="font-size:0.8rem;line-height:1.5;color:var(--text-muted);padding:6px 0;">
+      <strong style="color:var(--text);">This item is serial-tracked</strong> — branch stock is
+      counted directly from its serial numbers, so it can't be edited as a plain number here
+      (any value typed in would just get overwritten back on the next reload).
+      <br><br>
+      To move stock between branches, use <strong>⇄ Transfer Stock</strong>.<br>
+      To add new units, open <strong>View Serials</strong> and add serial numbers under the branch that received them.
+    </div>`;
+    document.getElementById('inv-d-branch-save-btn').style.display = 'none';
+    document.getElementById('inv-d-branch-edit').style.display = 'block';
+    return;
+  }
+  document.getElementById('inv-d-branch-save-btn').style.display = '';
+
+  // Heads-up if another inventory record shares this exact name under a
+  // different Firestore doc id — a known way for "my edit didn't save" to
+  // happen: you're editing the right record, but the table/detail view opens
+  // a *different* duplicate record on the next visit, so the edit is real
+  // and persisted, just on a record you're not looking at anymore.
+  const dupes = PRICELIST.filter(x => x.id !== p.id && (x.name||'').trim().toLowerCase() === (p.name||'').trim().toLowerCase());
+  const dupeWarningHtml = dupes.length
+    ? `<div style="font-size:0.72rem;line-height:1.5;color:#f59e0b;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);padding:8px 10px;margin-bottom:8px;">
+        ⚠ ${dupes.length} other inventory record${dupes.length>1?'s share':' shares'} this exact name (id${dupes.length>1?'s':''}: ${dupes.map(d=>d.id).join(', ')}).
+        If stock edits seem to "not save," you may be looking at a different one after reload — check <strong>Reports → Duplicate Check</strong>.
+      </div>`
+    : '';
+
   // Build current branch list from every branch saved in Firestore, plus any legacy
   // branch keys already on this product (so older data isn't dropped).
   const savedBranchNames   = BRANCHES_CACHE.map(b => b.name).filter(Boolean);
   const productBranchNames = p.branches ? Object.keys(p.branches) : [];
   const branchList = Array.from(new Set([...savedBranchNames, ...productBranchNames]));
 
-  const inputsEl = document.getElementById('inv-d-branch-inputs');
-
   if (!branchList.length) {
-    inputsEl.innerHTML = `<div style="font-size:0.78rem;color:var(--text-muted);padding:6px 0;">
+    inputsEl.innerHTML = dupeWarningHtml + `<div style="font-size:0.78rem;color:var(--text-muted);padding:6px 0;">
       No branches created yet. Add one in <strong>Branch Management</strong> first, or enter one below.</div>`;
   } else {
-    inputsEl.innerHTML = branchList.map(br => {
+    inputsEl.innerHTML = dupeWarningHtml + branchList.map(br => {
       const val = p.branches ? (p.branches[br] ?? '') : '';
       return `<div style="display:flex;align-items:center;gap:10px;">
         <span style="flex:1;font-size:0.82rem;">${br}</span>
@@ -17075,6 +17239,7 @@ async function saveBranchStocks() {
   if (window._currentRole !== 'super') { showToast('Super Admin only.'); return; }
   const p = PRICELIST.find(x => x.id === _invDetailId);
   if (!p) return;
+  if (p.hasSerials) { showToast('Serial-tracked item — use Transfer Stock or View Serials instead.'); return; }
 
   const inputs = document.querySelectorAll('#inv-d-branch-inputs input[data-branch]');
   const branches = {};
@@ -17098,11 +17263,34 @@ async function saveBranchStocks() {
   const fb = window._fb;
   if (fb && !String(p.id).startsWith('local')) {
     try {
-      await fb.updateDoc(fb.doc(fb.db, 'stocks', p.id), {
+      const docRef = fb.doc(fb.db, 'stocks', p.id);
+      await fb.updateDoc(docRef, {
         branches: branches,
         stockQty: totalStock
       });
-      showToast('Branch stocks saved.');
+
+      // Read-after-write check: don't just trust that updateDoc() resolved —
+      // confirm the value that's actually sitting in Firestore right now
+      // matches what we intended. This catches cases that otherwise look
+      // like a silent "saved, but reverts on reload" bug: a Firestore rule
+      // partially rejecting the write, a stale/duplicate doc under the same
+      // product name receiving the real writes elsewhere, etc. If it
+      // doesn't match, the person needs to know immediately rather than
+      // discovering it next reload.
+      const verifySnap = await fb.getDoc(docRef);
+      const serverData = verifySnap.exists() ? verifySnap.data() : null;
+      const serverStockQty = serverData ? serverData.stockQty : undefined;
+      const serverBranches = serverData ? serverData.branches : undefined;
+      const branchesMatch = serverBranches && Object.keys(branches).every(br => (parseInt(serverBranches[br]) || 0) === (parseInt(branches[br]) || 0));
+
+      if (!verifySnap.exists()) {
+        showToast('⚠ Save failed verification: this item no longer exists in the database (id: ' + p.id + '). It may have been deleted or merged elsewhere.', 8000);
+      } else if (serverStockQty !== totalStock || !branchesMatch) {
+        console.warn('Branch stock save verification mismatch', { id: p.id, wrote: { branches, totalStock }, serverData });
+        showToast('⚠ Saved, but the database still shows a different value after re-checking — this usually means Firestore security rules are rejecting part of the write, or another record for this item exists. Check the browser console for details.', 8000);
+      } else {
+        showToast('Branch stocks saved.');
+      }
     } catch(e) {
       showToast('⚠ Could not save to database: ' + (e.code || e.message || e), 5000);
     }
@@ -17112,6 +17300,7 @@ async function saveBranchStocks() {
   renderInvBranchTable(p);
   renderInventory(); // refresh main table stock count
 }
+
 
 // ── Transfer stock between branches ──────────────────────────────
 // For plain qty-tracked products this moves a quantity from one branch's
@@ -18435,6 +18624,7 @@ function syncPOAndSalesBranchSelects() {
     }
   });
   populateInvBranchFilter();
+  populateInvStockBranchFilter();
   syncHRBranchSelects();
   populateReimbBranchFilter();
 }
@@ -18585,7 +18775,7 @@ function syncHRBranchSelects() {
           <div style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.12em;color:var(--red);text-transform:uppercase;margin-bottom:8px;">Edit Branch Stocks</div>
           <div id="inv-d-branch-inputs" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
           <div style="display:flex;gap:8px;margin-top:10px;">
-            <button onclick="saveBranchStocks()" class="btn btn-red" style="flex:1;">Save</button>
+            <button id="inv-d-branch-save-btn" onclick="saveBranchStocks()" class="btn btn-red" style="flex:1;">Save</button>
             <button onclick="document.getElementById('inv-d-branch-edit').style.display='none'" class="btn btn-ghost" style="width:100px;margin:0;">Cancel</button>
           </div>
         </div>
