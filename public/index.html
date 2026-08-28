@@ -4683,7 +4683,7 @@ body.app-running #screen-app   { display:flex !important; }
           <div class="panel-title" style="margin-bottom:14px;">All Requests — Pending Approval
             <span id="reimb-pending-count" style="margin-left:8px;background:var(--red);color:#fff;padding:2px 8px;font-family:var(--mono);font-size:0.62rem;"></span>
             <button id="reimb-fix-branches-btn" onclick="migrateReimbBranchBackfill()" style="margin-left:auto;background:transparent;color:var(--text);border:1px solid var(--border2);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;display:none;" title="One-time fix: freezes the branch on old reimbursement records so they stop following the applicant when their profile branch changes">⚑ Fix Legacy Branches</button>
-            <button id="reimb-transfer-btn" onclick="openTransferModal()" style="background:transparent;color:#ffa726;border:1px solid rgba(255,167,38,0.4);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;display:none;" title="Move funds from one branch's Running Balance to another">⇄ Transfer Funds</button>
+            <button id="reimb-transfer-btn" onclick="openTransferModal()" style="background:transparent;color:#ffa726;border:1px solid rgba(255,167,38,0.4);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;display:none;" title="Move funds from one branch's Running Balance to another. Admin-submitted transfers require Super Admin approval.">⇄ Transfer Funds</button>
             <button onclick="openAckModal()" style="background:transparent;color:var(--text);border:1px solid var(--border2);padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ Add Acknowledgement</button>
           </div>
           <div class="reimb-filter-bar">
@@ -5432,23 +5432,26 @@ body.app-running #screen-app   { display:flex !important; }
   </div>
 </div>
 
-<!-- ══════════════ TRANSFER FUNDS BETWEEN BRANCHES MODAL (Super Admin only) ══ -->
+<!-- ══════════════ TRANSFER FUNDS BETWEEN BRANCHES MODAL (Admin / Super Admin) ══ -->
 <!-- Moves money that already exists in the system from one branch's Running -->
 <!-- Balance to another's. Unlike an Acknowledgement (which brings NEW money -->
 <!-- into the fund and needs separate approval), a transfer just relocates   -->
-<!-- existing funds between two branches, so it posts as two already-        -->
-<!-- APPROVED, linked records — a "Transfer Out" on the source branch and a  -->
-<!-- "Transfer In" on the destination branch — and both take effect          -->
-<!-- immediately on the Running Balance cards. Voidable individually from    -->
-<!-- the admin table like any other reimbursement record.                    -->
+<!-- existing funds between two branches, posting as two linked records — a  -->
+<!-- "Transfer Out" on the source branch and a "Transfer In" on the          -->
+<!-- destination branch. When a SUPER ADMIN submits, both legs post already  -->
+<!-- APPROVED and take effect immediately. When an ADMIN submits, both legs  -->
+<!-- post PENDING and sit in the normal approval queue — the transfer only   -->
+<!-- affects either branch's Running Balance once a Super Admin approves it. -->
+<!-- Voidable/approvable individually from the admin table like any other    -->
+<!-- reimbursement record (the linked leg follows automatically).           -->
 <div id="modal-transfer" class="modal-overlay" onclick="if(event.target===this)closeTransferModal()">
   <div class="modal-card" style="max-width:420px;">
     <div class="modal-title">
       ⇄ &nbsp;Transfer Funds Between Branches
       <button class="modal-close" onclick="closeTransferModal()">✕</button>
     </div>
-    <div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);letter-spacing:0.03em;margin-bottom:16px;line-height:1.5;">
-      Moves funds directly out of one branch's Running Balance and into another's. Both sides post as already-approved records. Super Admin only.
+    <div style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);letter-spacing:0.03em;margin-bottom:16px;line-height:1.5;" id="transfer-modal-desc">
+      Moves funds directly out of one branch's Running Balance and into another's.
     </div>
     <div class="field">
       <label>From Branch *</label>
@@ -6268,13 +6271,17 @@ function initApp(){
 
   // Reimbursements nav — visible to all roles
   // Admin panel on the page visible to Admin and Super Admin (Admin has
-  // view/add-acknowledgement access, but approve/reject/void stay Super-only)
+  // view/add-acknowledgement/initiate-transfer access, but approve/reject/void
+  // stay Super-only — including for Admin-initiated fund transfers)
   const reimbAdminPanel = document.getElementById('reimb-admin-panel');
   if(reimbAdminPanel) reimbAdminPanel.style.display = (currentRole === 'super' || currentRole === 'admin') ? 'block' : 'none';
   const reimbFixBranchesBtn = document.getElementById('reimb-fix-branches-btn');
   if(reimbFixBranchesBtn) reimbFixBranchesBtn.style.display = currentRole === 'super' ? 'inline-block' : 'none';
+  // Transfer Funds — Admin and Super Admin can both initiate a transfer.
+  // Admin-submitted transfers post as PENDING and still require Super Admin
+  // approval before they affect any branch's Running Balance.
   const reimbTransferBtn = document.getElementById('reimb-transfer-btn');
-  if(reimbTransferBtn) reimbTransferBtn.style.display = currentRole === 'super' ? 'inline-block' : 'none';
+  if(reimbTransferBtn) reimbTransferBtn.style.display = (currentRole === 'super' || currentRole === 'admin') ? 'inline-block' : 'none';
 
   // Load reimbursements from Firestore
   loadReimbFromFirestore();
@@ -13084,21 +13091,29 @@ async function submitAck(){
   }
 }
 
-// ══════════════ TRANSFER FUNDS BETWEEN BRANCHES (Super Admin only) ══════════
+// ══════════════ TRANSFER FUNDS BETWEEN BRANCHES (Admin / Super Admin) ═══════
 // Moves money already sitting in one branch's Running Balance into another
 // branch's Running Balance. This is NOT new money entering the system (that's
 // what an Acknowledgement/Replenish is for) — it's purely a relocation, so it
-// posts as two linked records that are already 'approved' and take effect on
-// both branches' balances immediately:
+// posts as two linked records:
 //   • source branch  → type 'TransferOut' (subtracts, like a Request)
 //   • destination     → type 'TransferIn'  (adds, like a Replenish)
-// Both share a `transferId` so they can be traced back to each other, and
-// both are individually voidable later from the admin table like any other
-// reimbursement record (voiding one side does NOT auto-void the other —
-// Super Admin can void both if the whole transfer needs reversing).
+// Both share a `transferId` so they can be traced back to each other.
+//
+// Who can submit, and what happens next:
+//   • SUPER ADMIN → both legs post already 'approved' and take effect on
+//     both branches' balances immediately (no separate approval step).
+//   • ADMIN → both legs post 'pending' and sit in the same approval queue as
+//     ordinary reimbursement requests. Neither branch's Running Balance moves
+//     until a Super Admin reviews and approves the transfer (see
+//     approveReimb/rejectReimb, which approve/reject both linked legs
+//     together so the two branches never end up half-transferred).
+// Both legs are individually voidable later from the admin table like any
+// other reimbursement record (voiding one side auto-voids the other —
+// Super Admin only, same as approval).
 
 function openTransferModal(){
-  if(currentRole !== 'super'){ showToast('Access restricted — Super Admin required.'); return; }
+  if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const amtEl = document.getElementById('transfer-amount');
   if(amtEl) amtEl.value = '';
   const notesEl = document.getElementById('transfer-notes');
@@ -13107,6 +13122,12 @@ function openTransferModal(){
   if(msgEl) msgEl.innerHTML = '';
   const btn = document.getElementById('transfer-submit-btn');
   if(btn){ btn.disabled=false; btn.textContent='Transfer Funds'; }
+  const descEl = document.getElementById('transfer-modal-desc');
+  if(descEl){
+    descEl.textContent = currentRole === 'super'
+      ? 'Moves funds directly out of one branch\'s Running Balance and into another\'s. Both sides post as already-approved records.'
+      : 'Moves funds out of one branch\'s Running Balance and into another\'s. Both sides post as a pending request and require Super Admin approval before either balance changes.';
+  }
   populateTransferBranchSelects();
   document.getElementById('modal-transfer').classList.add('active');
   if(amtEl) setTimeout(()=>amtEl.focus(), 50);
@@ -13169,7 +13190,7 @@ function updateTransferToBalanceHint(){
 }
 
 async function submitTransfer(){
-  if(currentRole !== 'super'){ showToast('Access restricted — Super Admin required.'); return; }
+  if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const msgEl = document.getElementById('transfer-form-msg');
   const setMsg = (html, type='error') => { msgEl.innerHTML = `<div class="msg msg-${type}">${html}</div>`; };
 
@@ -13209,8 +13230,12 @@ async function submitTransfer(){
       }
     } catch(e){ console.warn('Could not fetch admin profile for transfer:', e); }
 
-    const today      = new Date().toISOString().slice(0,10);
-    const transferId = 'TRF-' + Date.now().toString(36).toUpperCase();
+    const today       = new Date().toISOString().slice(0,10);
+    const transferId  = 'TRF-' + Date.now().toString(36).toUpperCase();
+    // Super Admin transfers relocate funds immediately, same as before.
+    // Admin-submitted transfers post 'pending' and require Super Admin
+    // approval (via approveReimb) before either branch's balance moves.
+    const isSuperSubmit = currentRole === 'super';
     const baseData = {
       uid:            user.uid,
       applicantName:  realName,
@@ -13220,13 +13245,13 @@ async function submitTransfer(){
       notes,
       isVat:          false,
       tin:            '',
-      source:         'branch_transfer', // flags this as a Super-Admin fund transfer (voidable)
+      source:         'branch_transfer', // flags this as a fund transfer (voidable)
       transferId,
-      status:         'approved', // relocates existing funds — takes effect immediately, no separate approval step
+      status:         isSuperSubmit ? 'approved' : 'pending',
       createdAt:      fb.serverTimestamp(),
-      reviewedBy:     user.uid,
-      reviewedByName: realName,
-      reviewedAt:     fb.serverTimestamp(),
+      reviewedBy:     isSuperSubmit ? user.uid : null,
+      reviewedByName: isSuperSubmit ? realName : null,
+      reviewedAt:     isSuperSubmit ? fb.serverTimestamp() : null,
       rejectReason:   null
     };
 
@@ -13264,10 +13289,14 @@ async function submitTransfer(){
     renderReimbAdminTable();
     renderReimbSummary();
 
-    const actText = `Fund transfer — ₱${fmt2(amount)} from ${fromBranch} to ${toBranch} (${transferId})`;
-    prependActivity({ text: actText, green: true });
-    if(typeof logActivity === 'function') logActivity({ text: actText, type: 'reimbursement', green: true });
-    showToast(`Transferred ₱${fmt2(amount)} from ${fromBranch} to ${toBranch} ✓`);
+    const actText = isSuperSubmit
+      ? `Fund transfer — ₱${fmt2(amount)} from ${fromBranch} to ${toBranch} (${transferId})`
+      : `Fund transfer requested — ₱${fmt2(amount)} from ${fromBranch} to ${toBranch} (${transferId}), pending Super Admin approval`;
+    prependActivity({ text: actText, green: isSuperSubmit });
+    if(typeof logActivity === 'function') logActivity({ text: actText, type: 'reimbursement', green: isSuperSubmit });
+    showToast(isSuperSubmit
+      ? `Transferred ₱${fmt2(amount)} from ${fromBranch} to ${toBranch} ✓`
+      : `Transfer request submitted — pending Super Admin approval.`);
   } catch(e){
     setMsg('Error: ' + (e.message||e));
     btn.disabled = false; btn.textContent = 'Transfer Funds';
@@ -13736,19 +13765,34 @@ async function approveReimb(id, btn){
   const fb   = window._fb;
   const user = window._currentFirebaseUser;
   if(!fb||!user) return;
-  _reimbActionInProgress.add(id);
+
+  const r = ALL_REIMBS.find(x=>x.id===id);
+
+  // ── Admin-submitted fund transfers post as TWO linked pending records
+  // (TransferOut on the source branch, TransferIn on the destination branch)
+  // sharing a `transferId`. Approving only one leg would credit/debit one
+  // branch without the other, so both legs are approved together.
+  const isTransferLeg = r && (r.type === 'TransferOut' || r.type === 'TransferIn') && r.transferId;
+  const counterpart = isTransferLeg
+    ? ALL_REIMBS.find(x => x.transferId === r.transferId && x.id !== r.id && x.status === 'pending')
+    : null;
+  const idsToApprove = counterpart ? [id, counterpart.id] : [id];
+
+  idsToApprove.forEach(aid => _reimbActionInProgress.add(aid));
   if(btn) btn.disabled = true;
   try {
-    const ref = fb.doc(fb.db, 'reimbursements', id);
-    await fb.updateDoc(ref, {
-      status:     'approved',
-      reviewedBy: user.uid,
-      reviewedAt: fb.serverTimestamp()
-    });
-    const idx = ALL_REIMBS.findIndex(r=>r.id===id);
-    if(idx>-1){ ALL_REIMBS[idx].status='approved'; ALL_REIMBS[idx].reviewedBy=user.uid; }
+    for(const aid of idsToApprove){
+      const ref = fb.doc(fb.db, 'reimbursements', aid);
+      await fb.updateDoc(ref, {
+        status:     'approved',
+        reviewedBy: user.uid,
+        reviewedAt: fb.serverTimestamp()
+      });
+      const idx = ALL_REIMBS.findIndex(x=>x.id===aid);
+      if(idx>-1){ ALL_REIMBS[idx].status='approved'; ALL_REIMBS[idx].reviewedBy=user.uid; }
+    }
 
-    // Balance is now computed live from approved Replenish records (see
+    // Balance is now computed live from approved Replenish/TransferIn records (see
     // reimbBranchBalance) — setting status to 'approved' above is enough for
     // it to be picked up, with no separate settings/reimbFund write needed.
 
@@ -13761,14 +13805,16 @@ async function approveReimb(id, btn){
     const nb = document.getElementById('badge-reimb-nav');
     if(nb){ nb.textContent=pending; nb.style.display=pending>0?'inline':'none'; }
     const approved = ALL_REIMBS.find(x=>x.id===id);
-    const actText = `Reimbursement approved — ${approved?.purpose||''} — ₱${fmt2(approved?.amount||0)} (${approved?.refNo||id})`;
+    const actText = counterpart
+      ? `Fund transfer approved — ₱${fmt2(approved?.amount||0)} (${approved?.transferId||id}) — both branches updated`
+      : `Reimbursement approved — ${approved?.purpose||''} — ₱${fmt2(approved?.amount||0)} (${approved?.refNo||id})`;
     prependActivity({ text: actText, green: true });
     logActivity({ text: actText, type: 'reimbursement_approved', green: true });
-    showToast('Reimbursement approved ✓');
+    showToast(counterpart ? 'Fund transfer approved ✓' : 'Reimbursement approved ✓');
   } catch(e){
     showToast('Error: ' + (e.message||e));
   } finally {
-    _reimbActionInProgress.delete(id);
+    idsToApprove.forEach(aid => _reimbActionInProgress.delete(aid));
     if(btn) btn.disabled = false;
   }
 }
@@ -13782,18 +13828,32 @@ async function rejectReimb(id, btn){
   const fb   = window._fb;
   const user = window._currentFirebaseUser;
   if(!fb||!user) return;
-  _reimbActionInProgress.add(id);
+
+  const r = ALL_REIMBS.find(x=>x.id===id);
+
+  // Same linked-leg handling as approveReimb — reject both sides of an
+  // Admin-submitted fund transfer together so neither branch is left with a
+  // dangling half-transfer.
+  const isTransferLeg = r && (r.type === 'TransferOut' || r.type === 'TransferIn') && r.transferId;
+  const counterpart = isTransferLeg
+    ? ALL_REIMBS.find(x => x.transferId === r.transferId && x.id !== r.id && x.status === 'pending')
+    : null;
+  const idsToReject = counterpart ? [id, counterpart.id] : [id];
+
+  idsToReject.forEach(rid => _reimbActionInProgress.add(rid));
   if(btn) btn.disabled = true;
   try {
-    const ref = fb.doc(fb.db, 'reimbursements', id);
-    await fb.updateDoc(ref, {
-      status:       'rejected',
-      rejectReason: reason,
-      reviewedBy:   user.uid,
-      reviewedAt:   fb.serverTimestamp()
-    });
-    const idx = ALL_REIMBS.findIndex(r=>r.id===id);
-    if(idx>-1){ ALL_REIMBS[idx].status='rejected'; ALL_REIMBS[idx].rejectReason=reason; ALL_REIMBS[idx].reviewedBy=user.uid; }
+    for(const rid of idsToReject){
+      const ref = fb.doc(fb.db, 'reimbursements', rid);
+      await fb.updateDoc(ref, {
+        status:       'rejected',
+        rejectReason: reason,
+        reviewedBy:   user.uid,
+        reviewedAt:   fb.serverTimestamp()
+      });
+      const idx = ALL_REIMBS.findIndex(x=>x.id===rid);
+      if(idx>-1){ ALL_REIMBS[idx].status='rejected'; ALL_REIMBS[idx].rejectReason=reason; ALL_REIMBS[idx].reviewedBy=user.uid; }
+    }
     closeReimbDetail();
     renderMyReimbTable();
     renderReimbAdminTable();
@@ -13801,14 +13861,16 @@ async function rejectReimb(id, btn){
     const nb2 = document.getElementById('badge-reimb-nav');
     if(nb2){ nb2.textContent=pending2; nb2.style.display=pending2>0?'inline':'none'; }
     const rejected = ALL_REIMBS.find(x=>x.id===id);
-    const actTextR = `Reimbursement rejected — ${rejected?.purpose||''} (${rejected?.refNo||id})`;
+    const actTextR = counterpart
+      ? `Fund transfer rejected — ₱${fmt2(rejected?.amount||0)} (${rejected?.transferId||id})`
+      : `Reimbursement rejected — ${rejected?.purpose||''} (${rejected?.refNo||id})`;
     prependActivity({ text: actTextR, green: false });
     logActivity({ text: actTextR, type: 'reimbursement_rejected', green: false });
-    showToast('Reimbursement rejected.');
+    showToast(counterpart ? 'Fund transfer rejected.' : 'Reimbursement rejected.');
   } catch(e){
     showToast('Error: ' + (e.message||e));
   } finally {
-    _reimbActionInProgress.delete(id);
+    idsToReject.forEach(rid => _reimbActionInProgress.delete(rid));
     if(btn) btn.disabled = false;
   }
 }
