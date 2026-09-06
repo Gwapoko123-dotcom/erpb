@@ -4654,6 +4654,16 @@ body.app-running #screen-app   { display:flex !important; }
           <div class="panel-title" style="margin-bottom:14px;">My Reimbursement Requests
             <button onclick="openReimbModal()" style="margin-left:auto;background:var(--red);color:#fff;border:none;padding:7px 18px;cursor:pointer;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.08em;text-transform:uppercase;">+ New Request</button>
           </div>
+          <div class="reimb-filter-bar">
+            <label style="font-family:var(--mono);font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);white-space:nowrap;">Type:</label>
+            <select id="my-reimb-type-filter" onchange="myReimbPage=0;renderMyReimbTable()">
+              <option value="">All Types</option>
+              <option value="Request">Request</option>
+              <option value="Replenish">Replenish</option>
+              <option value="TransferIn">Transfer In</option>
+              <option value="TransferOut">Transfer Out</option>
+            </select>
+          </div>
           <div style="overflow-x:auto;border:1px solid var(--border2);">
             <table class="reimb-table">
               <thead><tr>
@@ -4688,6 +4698,13 @@ body.app-running #screen-app   { display:flex !important; }
           </div>
           <div class="reimb-filter-bar">
             <input type="text" id="reimb-search" placeholder="Search by name, purpose, or ref#…" style="flex:1;min-width:180px;" oninput="adminReimbPage=0;renderReimbAdminTable()"/>
+            <select id="reimb-type-filter" onchange="adminReimbPage=0;renderReimbAdminTable()">
+              <option value="">All Types</option>
+              <option value="Request">Request</option>
+              <option value="Replenish">Replenish</option>
+              <option value="TransferIn">Transfer In</option>
+              <option value="TransferOut">Transfer Out</option>
+            </select>
             <select id="reimb-status-filter" onchange="adminReimbPage=0;renderReimbAdminTable()">
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
@@ -5402,11 +5419,11 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ ADD ACKNOWLEDGEMENT MODAL (Super Admin only) ══════════════ -->
-<!-- Deliberately minimal: the only person who can create these is the Super -->
-<!-- Admin themselves, so there's no receipt/category/purpose to collect —   -->
-<!-- just the amount. It posts straight into the pending-approval queue as  -->
-<!-- a Replenish record (adding immediately to "For Acknowledgement"), and  -->
-<!-- can be voided by the Super Admin at any time from the table below.     -->
+<!-- Collects branch, date, amount, and purpose. Date defaults to today but  -->
+<!-- is a normal editable field. It posts straight into the pending-approval -->
+<!-- queue as a Replenish record (adding immediately to "For                -->
+<!-- Acknowledgement"), and can be voided by the Super Admin at any time     -->
+<!-- from the table below.                                                  -->
 <div id="modal-ack" class="modal-overlay" onclick="if(event.target===this)closeAckModal()">
   <div class="modal-card" style="max-width:400px;">
     <div class="modal-title">
@@ -5421,8 +5438,16 @@ body.app-running #screen-app   { display:flex !important; }
       <select id="ack-branch"></select>
     </div>
     <div class="field">
+      <label>Date *</label>
+      <input type="date" id="ack-date"/>
+    </div>
+    <div class="field">
       <label>Amount (₱) *</label>
       <input type="number" id="ack-amount" min="0" step="0.01" placeholder="0.00" autofocus/>
+    </div>
+    <div class="field">
+      <label>Purpose *</label>
+      <input type="text" id="ack-purpose" placeholder="e.g. Petty cash fund replenishment"/>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-red" id="ack-submit-btn" onclick="submitAck()" style="flex:1;">Add Acknowledgement</button>
@@ -12770,7 +12795,9 @@ function renderMyReimbTable(){
   if(!user) return;
   renderReimbSummary();
   MY_REIMBS = ALL_REIMBS.filter(r => r.uid === user.uid);
+  const myTypeF = document.getElementById('my-reimb-type-filter')?.value || '';
   const visible = (!reimbBranchFilter ? MY_REIMBS : MY_REIMBS.filter(r => reimbBranchMatches(reimbApplicantBranch(r), reimbBranchFilter)))
+    .filter(r => !myTypeF || (r.type||'Request') === myTypeF)
     .sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
   const tbody    = document.getElementById('my-reimb-tbody');
   const empty    = document.getElementById('my-reimb-empty');
@@ -12849,6 +12876,7 @@ function renderReimbAdminTable(){
 
   const search   = (document.getElementById('reimb-search')?.value || '').toLowerCase();
   const statusF  = document.getElementById('reimb-status-filter')?.value || '';
+  const typeF    = document.getElementById('reimb-type-filter')?.value || '';
   const monthF   = document.getElementById('reimb-month-filter')?.value || '';
   // Reset to first page whenever filters change (caller sets adminReimbPage=0 via change events)
 
@@ -12859,6 +12887,7 @@ function renderReimbAdminTable(){
 
   let filtered = branchScoped.filter(r => {
     const matchStatus = !statusF || r.status === statusF;
+    const matchType   = !typeF || (r.type||'Request') === typeF;
     const matchSearch = !search ||
       (r.refNo||'').toLowerCase().includes(search) ||
       (r.purpose||'').toLowerCase().includes(search) ||
@@ -12866,7 +12895,7 @@ function renderReimbAdminTable(){
     const matchMonth = !monthF || (r.createdAt?.seconds
       ? new Date(r.createdAt.seconds * 1000).toLocaleDateString('en-CA').slice(0,7) === monthF
       : false);
-    return matchStatus && matchSearch && matchMonth;
+    return matchStatus && matchType && matchSearch && matchMonth;
   }).sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
 
   const pending = branchScoped.filter(r => r.status === 'pending').length;
@@ -12972,16 +13001,24 @@ function newReimb(){
 // ═══════════════════════════════════════════════════════════════
 // A lightweight, amount-only entry point for Admin/Super Admin to manually
 // log a fund acknowledgement (Replenish) without going through the full
-// receipt/category/purpose form — there's nothing else that needs
-// collecting. It posts straight into the pending-approval queue
-// (immediately reflected in the "For Acknowledgement" total) and, like any
-// pending item, still requires Super Admin approve/reject. Only the Super
-// Admin can void it at any time.
+// receipt/category form — just branch, date, amount, and purpose. The date
+// defaults to today but is a normal editable field (backdate it if the fund
+// was actually acknowledged earlier). It posts straight into the
+// pending-approval queue (immediately reflected in the "For Acknowledgement"
+// total) and, like any pending item, still requires Super Admin
+// approve/reject. Only the Super Admin can void it at any time.
 
 function openAckModal(){
   if(currentRole !== 'super' && currentRole !== 'admin'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
   const amtEl = document.getElementById('ack-amount');
   if(amtEl) amtEl.value = '';
+  const purposeEl = document.getElementById('ack-purpose');
+  if(purposeEl) purposeEl.value = '';
+  const dateEl = document.getElementById('ack-date');
+  // Defaults to today but stays a normal editable date field — the admin can
+  // pick a different date (e.g. backdating to when the fund was actually
+  // acknowledged) either now or later by editing the field before submit.
+  if(dateEl) dateEl.value = new Date().toISOString().slice(0,10);
   const msgEl = document.getElementById('ack-form-msg');
   if(msgEl) msgEl.innerHTML = '';
   const btn = document.getElementById('ack-submit-btn');
@@ -13024,6 +13061,12 @@ async function submitAck(){
   const selectedBranch = document.getElementById('ack-branch').value;
   if(!selectedBranch){ setMsg('Please select a branch.'); return; }
 
+  const ackDate = document.getElementById('ack-date').value;
+  if(!ackDate){ setMsg('Please select a date.'); return; }
+
+  const purpose = (document.getElementById('ack-purpose').value || '').trim();
+  if(!purpose){ setMsg('Please enter a purpose.'); return; }
+
   const btn = document.getElementById('ack-submit-btn');
   btn.disabled = true; btn.textContent = 'Adding…';
   setMsg('Adding acknowledgement…', 'info');
@@ -13043,7 +13086,6 @@ async function submitAck(){
       }
     } catch(e){ console.warn('Could not fetch admin profile for acknowledgement:', e); }
 
-    const today = new Date().toISOString().slice(0,10);
     const data = {
       receiptName:    'Manual Acknowledgement',
       refNo:          'ACK-' + Date.now().toString(36).toUpperCase(),
@@ -13053,8 +13095,8 @@ async function submitAck(){
       category:       'Fund Acknowledgement',
       type:           'Replenish',
       branch:         resolvedBranch,
-      expenseDate:    today,
-      purpose:        'Manual acknowledgement entry',
+      expenseDate:    ackDate,
+      purpose,
       amount,
       notes:          '',
       isVat:          false,
@@ -21240,6 +21282,44 @@ let leadIdCounter = 1;
 let MY_LEAD_REQUESTS = []; // this user's own pending/rejected leadRequests — 'user' role only
 let _leadReqViewId = null; // currently-viewed request id (for the request detail modal)
 
+// ── Search-across-all-pages support ──────────────────────────────────────
+// The table itself only ever holds ONE paginated 20-doc chunk at a time
+// (LEADS_ACTIVE_CHUNK), so filtering that array only searches whatever page
+// happens to be on screen — a lead sitting on page 2 simply won't show up
+// while page 1 is displayed. To fix that, the search/status filters below
+// pull from a separate, unpaginated cache of every lead the current user is
+// allowed to see (LEADS_SEARCH_CACHE), fetched once on demand and reused
+// until something changes the underlying data (a new/edited/deleted lead,
+// or navigating back to an unfiltered paginated view).
+let LEADS_SEARCH_CACHE = null;   // null = not fetched yet; array once loaded
+let leadsSearchCacheLoading = false;
+let leadsFilterActive = false;   // true while search text or a status filter is applied
+
+// Fetches every lead the current user can see (same role-based scoping as
+// loadLeadsPage, just without the limit/cursor) so search can look across
+// ALL pages at once instead of just the currently-loaded chunk.
+async function ensureLeadsSearchCache() {
+  if (LEADS_SEARCH_CACHE) return LEADS_SEARCH_CACHE;
+  const fb = window._fb;
+  const role = window._currentRole || 'user';
+  const uid = window._currentFirebaseUser?.uid;
+  if (!fb || !uid) return [];
+  leadsSearchCacheLoading = true;
+  try {
+    const q = (role === 'admin' || role === 'super')
+      ? fb.query(fb.collection(fb.db, 'leads'), fb.orderBy('createdAt', 'desc'))
+      : fb.query(fb.collection(fb.db, 'leads'), fb.where('assigneeUid', '==', uid), fb.orderBy('createdAt', 'desc'));
+    const snap = await fb.getDocs(q);
+    LEADS_SEARCH_CACHE = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn('Could not load full leads list for search:', e);
+    LEADS_SEARCH_CACHE = [];
+  } finally {
+    leadsSearchCacheLoading = false;
+  }
+  return LEADS_SEARCH_CACHE;
+}
+
 const LEAD_STATUS_COLORS = {
   new:         '#1565c0',
   contacted:   '#0277bd',
@@ -21285,6 +21365,17 @@ function buildLeadsDisplayList() {
   return [...buildLeadRequestPseudoRows(), ...LEADS_ACTIVE_CHUNK];
 }
 
+// Looks a lead up by id in whichever list currently has it: the paginated
+// chunk on screen, or — when a lead was found via the cross-page search
+// cache — that cache instead. Without this fallback, clicking a search
+// result for a lead that lives on a different page than the one currently
+// loaded would fail to open (LEADS_ACTIVE_CHUNK only ever holds one page).
+function findLeadById(id) {
+  return LEADS_ACTIVE_CHUNK.find(l => l.id === id)
+      || (LEADS_SEARCH_CACHE || []).find(l => l.id === id)
+      || null;
+}
+
 // Refreshes both the real leads list and (for a plain user) their own
 // pending/rejected requests, then re-renders the combined table.
 async function loadMyLeadRequests() {
@@ -21308,6 +21399,7 @@ window.loadLeadsPage = async function(direction = 'init') {
   const tbody   = document.getElementById('leads-tbody');
   const emptyEl = document.getElementById('leads-empty');
   if (!tbody) return;
+  if (direction === 'init') LEADS_SEARCH_CACHE = null; // data may have changed — force a fresh fetch next search
   tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;font-family:var(--mono);color:var(--text-muted);">◇<br><br>STREAMING LEAD RECORDS…</td></tr>`;
   if (emptyEl) emptyEl.style.display = 'none';
   const fb   = window._fb;
@@ -21435,7 +21527,7 @@ function updateLeadsStats(list) {
   setEl('leads-stat-lost',      list.filter(l => l.status === 'lost').length);
 }
 
-window.filterLeadsTable = function() {
+window.filterLeadsTable = async function() {
   const q  = (document.getElementById('leads-search-input')?.value || '').toLowerCase().trim();
   const st = (document.getElementById('leads-filter-status')?.value || '').toLowerCase();
   const matchesSearch = l =>
@@ -21446,7 +21538,39 @@ window.filterLeadsTable = function() {
     (l.assigneeName||'').toLowerCase().includes(q) ||
     (l.leadId||'').toLowerCase().includes(q);
 
-  let filteredLeads = LEADS_ACTIVE_CHUNK.filter(matchesSearch);
+  const prevBtn = document.getElementById('leads-prev-btn');
+  const nextBtn = document.getElementById('leads-next-btn');
+  const ind     = document.getElementById('leads-page-indicator');
+
+  // No search text and no status filter — back to the normal paginated view
+  // of whatever chunk is currently loaded, with Prev/Next re-enabled.
+  if (!q && !st) {
+    leadsFilterActive = false;
+    renderLeadsTable(buildLeadsDisplayList());
+    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    const onFirstPage = leadsDocCursorHistory.length === 0;
+    if (prevBtn) { prevBtn.disabled = onFirstPage; prevBtn.style.opacity = onFirstPage ? '0.4' : '1'; }
+    if (nextBtn) { nextBtn.disabled = (LEADS_ACTIVE_CHUNK.length < 20); nextBtn.style.opacity = ''; }
+    if (ind) ind.textContent = `DISPLAYING ${LEADS_ACTIVE_CHUNK.length} LEAD RECORDS`;
+    return;
+  }
+
+  // A search term or status filter is active — search across EVERY lead the
+  // user can see, not just the one page currently loaded, so a match on
+  // page 2 shows up even while viewing page 1.
+  leadsFilterActive = true;
+  if (prevBtn) { prevBtn.disabled = true; prevBtn.style.opacity = '0.4'; }
+  if (nextBtn) { nextBtn.disabled = true; nextBtn.style.opacity = '0.4'; }
+  if (ind) ind.textContent = 'SEARCHING ALL LEADS…';
+
+  const allLeads = await ensureLeadsSearchCache();
+  // The filter/search box may have changed again while the fetch was in
+  // flight, or the user may have cleared it — re-check before rendering.
+  const qNow  = (document.getElementById('leads-search-input')?.value || '').toLowerCase().trim();
+  const stNow = (document.getElementById('leads-filter-status')?.value || '').toLowerCase();
+  if (qNow !== q || stNow !== st) return; // a newer call is already handling this
+
+  let filteredLeads = allLeads.filter(matchesSearch);
   if (st) filteredLeads = filteredLeads.filter(l => (l.status||'new') === st);
 
   // The status dropdown only lists real lead statuses, so a status filter
@@ -21456,6 +21580,7 @@ window.filterLeadsTable = function() {
 
   renderLeadsTable([...pseudoRows, ...filteredLeads]);
   updateLeadsStats(filteredLeads);
+  if (ind) ind.textContent = `SEARCH RESULTS: ${filteredLeads.length} LEAD${filteredLeads.length===1?'':'S'} (ALL PAGES)`;
 };
 
 async function loadUsersForLeadAssignee() {
@@ -21525,7 +21650,7 @@ window.openNewLeadModal = async function() {
 window.openEditLeadModal = function(id) {
   const role = window._currentRole || 'user';
   if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can edit leads.'); return; }
-  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  const lead = findLeadById(id);
   if (!lead) { showToast('Lead not found.'); return; }
   _leadEditId = id;
   document.getElementById('lead-modal-title').textContent = 'Edit Lead';
@@ -21610,6 +21735,7 @@ window.saveLead = async function() {
       showToast('Lead request submitted — awaiting Super Admin approval.');
     }
     closeLeadModal();
+    LEADS_SEARCH_CACHE = null; // data changed — force a fresh fetch next search
     if (isDirect || _leadEditId) {
       renderLeadsTable(buildLeadsDisplayList());
       updateLeadsStats(LEADS_ACTIVE_CHUNK);
@@ -21625,7 +21751,7 @@ window.saveLead = async function() {
 };
 
 window.viewLead = function(id) {
-  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  const lead = findLeadById(id);
   if (!lead) return;
   _leadViewId = id;
   const status   = lead.status   || 'new';
@@ -21947,7 +22073,7 @@ async function loadLeadConfirmation(leadId) {
   const fb   = window._fb;
   const role = window._currentRole || 'user';
   const uid  = window._currentFirebaseUser?.uid;
-  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === leadId);
+  const lead = findLeadById(leadId);
   const isAssigned = lead && lead.assigneeUid === uid;
   const canConfirm = role === 'admin' || role === 'super' || isAssigned;
   if (strip) strip.style.display = canConfirm ? 'flex' : 'none';
@@ -22025,19 +22151,20 @@ async function _updateLeadStatus(id, newStatus) {
   const actor = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'Admin';
   try {
     await fb.updateDoc(fb.doc(fb.db, 'leads', id), { status: newStatus, updatedAt: fb.serverTimestamp(), updatedBy: actor });
-    const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+    const lead = findLeadById(id);
     if (lead) lead.status = newStatus;
     showToast('Lead status updated to ' + newStatus.toUpperCase() + '.');
     closeLeadViewModal();
-    renderLeadsTable(LEADS_ACTIVE_CHUNK);
-    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    LEADS_SEARCH_CACHE = null; // status changed — force a fresh fetch next search
+    if (leadsFilterActive) { filterLeadsTable(); }
+    else { renderLeadsTable(LEADS_ACTIVE_CHUNK); updateLeadsStats(LEADS_ACTIVE_CHUNK); }
   } catch(err) { showToast('⚠ Could not update status: ' + (err.message || err)); }
 }
 
 window.deleteLead = async function(id) {
   const role = window._currentRole || 'user';
   if (role !== 'admin' && role !== 'super') { showToast('⚠ Only Admin or Super Admin can delete leads.'); return; }
-  const lead = LEADS_ACTIVE_CHUNK.find(l => l.id === id);
+  const lead = findLeadById(id);
   if (!lead) return;
   if (!confirm(`Delete lead "${lead.company || id}"? This cannot be undone.`)) return;
   const fb = window._fb; if (!fb) return;
@@ -22045,8 +22172,9 @@ window.deleteLead = async function(id) {
     await fb.deleteDoc(fb.doc(fb.db, 'leads', id));
     const idx = LEADS_ACTIVE_CHUNK.findIndex(l => l.id === id);
     if (idx !== -1) LEADS_ACTIVE_CHUNK.splice(idx, 1);
-    renderLeadsTable(LEADS_ACTIVE_CHUNK);
-    updateLeadsStats(LEADS_ACTIVE_CHUNK);
+    LEADS_SEARCH_CACHE = null; // deleted — force a fresh fetch next search
+    if (leadsFilterActive) { filterLeadsTable(); }
+    else { renderLeadsTable(LEADS_ACTIVE_CHUNK); updateLeadsStats(LEADS_ACTIVE_CHUNK); }
     showToast('Lead deleted.');
   } catch(err) { showToast('⚠ Could not delete: ' + (err.message || err)); }
 };
