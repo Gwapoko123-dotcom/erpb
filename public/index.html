@@ -358,13 +358,53 @@ window.SALES_ACTIVE_CHUNK = [];
 
   window.filterSalesLogTable = function() {
     const searchInput = document.getElementById('sales-search-input');
+    const fromInput = document.getElementById('sales-date-from');
+    const toInput = document.getElementById('sales-date-to');
     if (!searchInput) return;
+
     const sString = searchInput.value.toLowerCase().trim();
-    if (!sString) { renderSalesLogRecordsTable(SALES_ACTIVE_CHUNK); return; }
-    const filtered = SALES_ACTIVE_CHUNK.filter(tx => 
-      tx.txId.toLowerCase().includes(sString) || tx.customer.toLowerCase().includes(sString) || tx.branch.toLowerCase().includes(sString) || (tx.soldBy||'').toLowerCase().includes(sString)
-    );
+
+    // Parse the FROM/TO date pickers into local-time bounds. FROM starts at
+    // 00:00:00 of that day; TO extends to 23:59:59.999 of that day so the
+    // whole "to" day is included (not cut off at midnight).
+    let fromDate = null, toDate = null;
+    if (fromInput && fromInput.value) {
+      fromDate = new Date(fromInput.value + 'T00:00:00');
+    }
+    if (toInput && toInput.value) {
+      toDate = new Date(toInput.value + 'T23:59:59.999');
+    }
+
+    let filtered = SALES_ACTIVE_CHUNK;
+
+    if (sString) {
+      filtered = filtered.filter(tx =>
+        tx.txId.toLowerCase().includes(sString) || tx.customer.toLowerCase().includes(sString) || tx.branch.toLowerCase().includes(sString) || (tx.soldBy||'').toLowerCase().includes(sString)
+      );
+    }
+
+    if (fromDate || toDate) {
+      filtered = filtered.filter(tx => {
+        const d = tx.createdAt;
+        if (!(d instanceof Date) || isNaN(d)) return false;
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
+        return true;
+      });
+    }
+
     renderSalesLogRecordsTable(filtered);
+    updateSalesStatsCards(filtered);
+  };
+
+  // ── Clears just the date-range pickers and re-applies whatever text search ──
+  // is still active, restoring stats/table to reflect only the remaining filter.
+  window.clearSalesDateFilter = function() {
+    const fromInput = document.getElementById('sales-date-from');
+    const toInput = document.getElementById('sales-date-to');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    filterSalesLogTable();
   };
 
   // ── VOID A SALE (Admin / Super Admin only) ──
@@ -3458,8 +3498,19 @@ body.app-running #screen-app   { display:flex !important; }
         <h2 style="font-size: 1.1rem; letter-spacing: 0.05em; margin-bottom: 4px;">TRANSACTION HISTORY MATRIX</h2>
         <p style="font-size: 0.78rem; color: var(--text-muted);"></p>
       </div>
-      <div style="width: 260px;" class="field">
-        <input type="text" id="sales-search-input" placeholder="🔍 Filter by Customer, ID, or Branch..." oninput="filterSalesLogTable()" style="padding: 8px 12px; font-size: 0.8rem;"/>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+        <div style="width: 260px;" class="field">
+          <input type="text" id="sales-search-input" placeholder="🔍 Filter by Customer, ID, or Branch..." oninput="filterSalesLogTable()" style="padding: 8px 12px; font-size: 0.8rem;"/>
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.08em; color:var(--text-muted); display:block; margin-bottom:4px;">FROM</label>
+          <input type="date" id="sales-date-from" onchange="filterSalesLogTable()" style="padding: 8px 12px; font-size: 0.8rem;"/>
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.08em; color:var(--text-muted); display:block; margin-bottom:4px;">TO</label>
+          <input type="date" id="sales-date-to" onchange="filterSalesLogTable()" style="padding: 8px 12px; font-size: 0.8rem;"/>
+        </div>
+        <button class="qa-btn" onclick="clearSalesDateFilter()" style="padding:8px 14px; font-size:0.72rem;">Clear Dates</button>
       </div>
     </div>
 
@@ -7436,7 +7487,7 @@ const COMPANY_HEADERS = {
   jht: {
     name:    'TEKNOSERVE I.T. SERVICES',
     address: 'Door 13G, Unotres Realty Inc., Singao Road, Poblacion, Kidapawan City',
-    contact: 'Tel. No.: (064) 521 3263 Mobile No.: 09369916429 Email: info.teknoserve@gmail.com'
+    contact: 'Tel. No.: (064) 521 3263 Mobile No.: 09560713097 Email: info.teknoserve@gmail.com'
   }
 };
 let PRINT_HEADER_CHOICE = 'jcptech';
@@ -7614,6 +7665,16 @@ async function submitSale(){
     } catch(e) {
       console.warn('Could not save sale to Firestore:', e);
     }
+
+    // New customer? Auto-add them to Leads so they're tracked in the pipeline.
+    // No-ops quietly if a lead already exists under this name.
+    ensureLeadForCustomer({
+      name: customer,
+      contact: contactPerson,
+      phone: contact,
+      source: 'Sale',
+      notes: 'Auto-added from Sale ' + txId
+    });
   }
 
   // Update dashboard activity and totals
@@ -18502,6 +18563,67 @@ async function ensureLeadsNameCache(force) {
   return LEADS_NAME_CACHE;
 }
 
+// ═════════════════════════════════════════════════════════════
+//  🌱 AUTO-ADD NEW CUSTOMERS TO LEADS (from Sales or Quotations)
+// ═════════════════════════════════════════════════════════════
+// Whenever a Sale or Quotation is recorded for a person/company that isn't
+// already sitting in the Leads pipeline, silently create a lead for them so
+// nobody who's bought or been quoted slips through without being tracked.
+// Matching is case-insensitive against each lead's Company or Contact name —
+// the same fields the Sales/RMA "matched lead" autocomplete already searches.
+// Never blocks or fails the sale/quotation itself; any error is just logged.
+async function ensureLeadForCustomer(opts) {
+  const fb = window._fb;
+  if (!fb) return;
+  const name = (opts.name || '').trim();
+  if (!name) return;
+
+  try {
+    // Force a fresh pull so a lead added moments ago in this same session
+    // (or by someone else) isn't missed and duplicated.
+    await ensureLeadsNameCache(true);
+    const nameLower = name.toLowerCase();
+    const alreadyExists = LEADS_NAME_CACHE.some(l => {
+      const company = (l.company || '').trim().toLowerCase();
+      const contact = (l.contact || '').trim().toLowerCase();
+      return (company && company === nameLower) || (contact && contact === nameLower);
+    });
+    if (alreadyExists) return;
+
+    const actor   = (window._currentFirebaseUser?.displayName || window._currentFirebaseUser?.email) || 'System';
+    const leadId  = 'ld-' + String(leadIdCounter++).padStart(8, '0');
+    const payload = {
+      leadId,
+      company: name,
+      contact: opts.contact || '',
+      email: opts.email || '',
+      phone: opts.phone || '',
+      source: opts.source || 'Sales',
+      status: 'new',
+      priority: 'medium',
+      notes: opts.notes || '',
+      followUpDate: '',
+      assigneeUid: window._currentFirebaseUser?.uid || '',
+      assigneeName: actor,
+      assigneeEmail: window._currentFirebaseUser?.email || '',
+      createdAt: fb.serverTimestamp(),
+      createdBy: actor,
+      createdByUid: window._currentFirebaseUser?.uid || '',
+      autoCreated: true
+    };
+    const ref = await fb.addDoc(fb.collection(fb.db, 'leads'), payload);
+    // Keep both in-memory caches (Leads page list + autocomplete) in sync so
+    // the new lead shows up immediately without a manual refresh, and so a
+    // second sale/quotation for the same name in this session isn't duplicated.
+    const localEntry = { id: ref.id, ...payload, createdAt: { toDate: () => new Date() } };
+    if (typeof LEADS_ACTIVE_CHUNK !== 'undefined') LEADS_ACTIVE_CHUNK.unshift(localEntry);
+    LEADS_NAME_CACHE.push({ id: ref.id, ...payload });
+    showToast('New lead auto-added: ' + name);
+  } catch (e) {
+    console.warn('Could not auto-create lead for "' + name + '":', e);
+  }
+}
+
 function _escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -20643,6 +20765,17 @@ async function saveQuotation(status) {
       payload.preparedByUid = window._currentFirebaseUser?.uid || '';
       await fb.addDoc(fb.collection(fb.db, 'quotations'), payload);
       showToast('Quotation saved — ' + quoteId);
+
+      // New client? Auto-add them to Leads so they're tracked in the pipeline.
+      // No-ops quietly if a lead already exists under this name.
+      ensureLeadForCustomer({
+        name: client,
+        contact: payload.contact,
+        email: payload.email,
+        phone: payload.clientPhone,
+        source: 'Quotation',
+        notes: 'Auto-added from Quotation ' + quoteId
+      });
     }
     closeQuotationModal();
     await loadQuotationsFromFirebase('init');
