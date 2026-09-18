@@ -2240,6 +2240,10 @@ body.app-running #screen-app   { display:flex !important; }
                 <span class="sales-row-val" id="dash-sales-all">₱0.00</span>
               </div>
               <div class="sales-row" id="dash-sales-branches-container"></div>
+              <button id="dash-sales-per-staff-btn" onclick="openSalesPerStaffModal()" style="display:none;width:100%;margin-top:10px;background:transparent;border:1px dashed var(--border2);color:var(--text-muted);padding:9px 10px;cursor:pointer;font-family:var(--mono);font-size:0.66rem;letter-spacing:0.08em;text-transform:uppercase;align-items:center;justify-content:center;gap:6px;">
+                👤 View Total Sales Per Staff
+                <span style="font-family:var(--mono);font-size:0.56rem;letter-spacing:0.06em;color:#fff;background:var(--red);padding:1px 6px;text-transform:uppercase;">Super Admin</span>
+              </button>
             </div>
 
           </div>
@@ -5289,6 +5293,51 @@ body.app-running #screen-app   { display:flex !important; }
   </div>
 </div>
 
+<!-- ══════════════ TOTAL SALES PER STAFF — SUPER ADMIN ONLY ══════════════ -->
+<div id="modal-sales-per-staff" class="modal-overlay" onclick="if(event.target===this)closeSalesPerStaffModal()">
+  <div class="modal-card modal-xl">
+    <div class="modal-title" style="display:flex;align-items:center;gap:10px;">
+      👤 &nbsp;Total Sales — Per Staff
+      <span style="font-family:var(--mono);font-size:0.56rem;letter-spacing:0.06em;color:#fff;background:var(--red);padding:2px 8px;text-transform:uppercase;">Super Admin Only</span>
+      <button class="modal-close" onclick="closeSalesPerStaffModal()">✕</button>
+    </div>
+
+    <!-- Filters -->
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+      <div class="field" style="flex:1;min-width:160px;margin:0;">
+        <label style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:4px;">Branch</label>
+        <select id="sps-branch-filter" onchange="renderSalesPerStaffTable()"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 10px;color:var(--text);font-size:0.8rem;outline:none;">
+          <option value="">All Branches</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;min-width:160px;margin:0;">
+        <label style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:4px;">Month</label>
+        <select id="sps-month-filter" onchange="renderSalesPerStaffTable()"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 10px;color:var(--text);font-size:0.8rem;outline:none;">
+          <option value="">All Time</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;" id="sps-summary-note"></div>
+
+    <!-- Table -->
+    <div style="overflow-x:auto;border:1px solid var(--border2);max-height:60vh;overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+        <thead style="background:var(--bg3);position:sticky;top:0;">
+          <tr>
+            <th style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);padding:8px 12px;border-bottom:2px solid var(--border2);text-align:left;">Staff</th>
+            <th style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);padding:8px 12px;border-bottom:2px solid var(--border2);text-align:center;width:140px;">Transactions</th>
+            <th style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);padding:8px 12px;border-bottom:2px solid var(--border2);text-align:right;width:160px;">Total Sales</th>
+          </tr>
+        </thead>
+        <tbody id="sps-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <div id="modal-pricelist" class="modal-overlay" onclick="if(event.target===this)closePricelistModal()">
   <div class="modal-card modal-xl">
     <div class="modal-title">
@@ -6344,6 +6393,11 @@ function initApp(){
   // Deduction rate settings button — superadmin only
   const payrollRatesBtn = document.getElementById('payroll-rates-btn');
   if(payrollRatesBtn) payrollRatesBtn.style.display = currentRole === 'super' ? 'inline-flex' : 'none';
+
+  // Total Sales — Per Staff dashboard button/modal — superadmin only
+  const salesStaffBtn = document.getElementById('dash-sales-per-staff-btn');
+  if(salesStaffBtn) salesStaffBtn.style.display = currentRole === 'super' ? 'flex' : 'none';
+
 
   // Reimbursements nav — visible to all roles
   // Admin panel on the page visible to Admin and Super Admin (Admin has
@@ -9060,6 +9114,105 @@ function updateDashSalesTotals() {
 
   // Refresh the "Sales Overview — Last 7 Days" chart with real totals now that they're loaded
   if (typeof buildBarChart === 'function') buildBarChart();
+}
+
+// ════════════════════════════════════════════════════════════
+//  TOTAL SALES PER STAFF MODAL — Super Admin only
+// ════════════════════════════════════════════════════════════
+// Client-side gating for UX; real access control still belongs in Firestore
+// security rules, same caveat as the rest of the app's role-based UI checks.
+
+function openSalesPerStaffModal() {
+  if (window._currentRole !== 'super') {
+    showToast('⚠ Only a superadmin can view sales per staff.');
+    return;
+  }
+
+  // Populate branch filter from the same branches cache used elsewhere
+  const branchSel = document.getElementById('sps-branch-filter');
+  if (branchSel) {
+    const prevVal = branchSel.value;
+    const names = (typeof BRANCHES_CACHE !== 'undefined' ? BRANCHES_CACHE : []).map(b => b.name).filter(Boolean);
+    branchSel.innerHTML = '<option value="">All Branches</option>' +
+      names.map(nm => `<option value="${nm}">${nm}</option>`).join('');
+    if (names.includes(prevVal)) branchSel.value = prevVal;
+  }
+
+  // Populate month filter from the actual months present in SALES_LOG
+  const monthSel = document.getElementById('sps-month-filter');
+  if (monthSel) {
+    const prevVal = monthSel.value;
+    const monthMap = {}; // 'YYYY-MM' -> display label, e.g. 'September 2026'
+    (SALES_LOG || []).forEach(tx => {
+      const d = tx.date ? new Date(tx.date) : null;
+      if (!d || isNaN(d.getTime())) return;
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (!monthMap[key]) monthMap[key] = d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long' });
+    });
+    const keys = Object.keys(monthMap).sort().reverse(); // newest first
+    monthSel.innerHTML = '<option value="">All Time</option>' +
+      keys.map(k => `<option value="${k}">${monthMap[k]}</option>`).join('');
+    if (keys.includes(prevVal)) monthSel.value = prevVal;
+  }
+
+  renderSalesPerStaffTable();
+  document.getElementById('modal-sales-per-staff').classList.add('active');
+}
+
+function closeSalesPerStaffModal() {
+  document.getElementById('modal-sales-per-staff').classList.remove('active');
+}
+
+function renderSalesPerStaffTable() {
+  if (window._currentRole !== 'super') return; // guard the work, not just the UI
+
+  const tbody = document.getElementById('sps-table-body');
+  const noteEl = document.getElementById('sps-summary-note');
+  if (!tbody) return;
+
+  const branchFilter = document.getElementById('sps-branch-filter')?.value || '';
+  const monthFilter = document.getElementById('sps-month-filter')?.value || ''; // 'YYYY-MM' or ''
+
+  let sales = (SALES_LOG || []).filter(tx => !tx.voided);
+
+  if (branchFilter) sales = sales.filter(tx => tx.branch === branchFilter);
+
+  if (monthFilter) {
+    sales = sales.filter(tx => {
+      const d = tx.date ? new Date(tx.date) : null;
+      if (!d || isNaN(d.getTime())) return false;
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      return key === monthFilter;
+    });
+  }
+
+  const byStaff = {};
+  sales.forEach(tx => {
+    const name = tx.soldBy || 'Unknown';
+    if (!byStaff[name]) byStaff[name] = { total: 0, count: 0 };
+    byStaff[name].total += (tx.total || 0);
+    byStaff[name].count += 1;
+  });
+
+  const staffNames = Object.keys(byStaff).sort((a, b) => byStaff[b].total - byStaff[a].total);
+
+  if (noteEl) {
+    const branchLbl = branchFilter || 'All Branches';
+    const monthLbl = document.getElementById('sps-month-filter')?.selectedOptions?.[0]?.textContent || 'All Time';
+    noteEl.textContent = `${branchLbl} · ${monthLbl} · ${staffNames.length} staff · ${sales.length} transaction(s)`;
+  }
+
+  if (staffNames.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">◇<br><br>NO SALES FOUND FOR THIS FILTER</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = staffNames.map(name => `
+    <tr>
+      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);font-size:0.8rem;">${name}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:center;font-family:var(--mono);font-size:0.76rem;color:var(--text-muted);">${byStaff[name].count}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:right;font-family:var(--mono);font-size:0.82rem;color:var(--green);font-weight:600;">₱${fmt(byStaff[name].total)}</td>
+    </tr>`).join('');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -17692,6 +17845,15 @@ function canReviewTransferRequest(req) {
   return false;
 }
 
+// Broader than canReviewTransferRequest: also lets the *requesting* branch's
+// admin see the request (read-only — they can't approve/reject their own
+// outgoing transfer, only the receiving branch's admin or a superadmin can).
+function canViewTransferRequest(req) {
+  if (canReviewTransferRequest(req)) return true;
+  if (window._currentRole === 'admin') return req.fromBranch === window._currentUserBranch;
+  return false;
+}
+
 // Updates the "🔔 Transfer Requests" button's visibility and pending-count
 // badge in the Inventory page header.
 async function refreshTransferRequestBadge() {
@@ -17742,7 +17904,7 @@ async function loadTransferRequests() {
   try {
     const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'stockTransfers'), fb.where('status', '==', 'pending')));
     const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const relevant = all.filter(canReviewTransferRequest);
+    const relevant = all.filter(canViewTransferRequest);
     renderTransferRequestsTable(relevant);
   } catch (e) {
     console.error('Failed to load transfer requests', e);
@@ -17774,10 +17936,14 @@ function renderTransferRequestsTable(requests) {
       <td style="padding:9px 14px;font-size:0.78rem;">${r.requestedBy || '—'}</td>
       <td style="padding:9px 14px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">${dateStr}</td>
       <td style="padding:9px 14px;text-align:center;white-space:nowrap;">
+        ${canReviewTransferRequest(r) ? `
         <button onclick="approveTransferRequest('${r.id}', this)"
           style="background:var(--green-dim,rgba(46,160,67,0.12));border:1px solid rgba(46,160,67,0.35);color:var(--green);padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);margin-right:4px;">APPROVE</button>
         <button onclick="rejectTransferRequest('${r.id}', this)"
           style="background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);">REJECT</button>
+        ` : `
+        <span style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.05em;color:var(--text-muted);text-transform:uppercase;">Awaiting ${r.toBranch} admin</span>
+        `}
       </td>
     </tr>`;
   }).join('');
