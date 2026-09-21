@@ -3738,7 +3738,8 @@ body.app-running #screen-app   { display:flex !important; }
               </div>
               <div class="field" style="flex:1; min-width:140px; margin:0;">
                 <label style="font-size:0.7rem;">Description (optional)</label>
-                <input type="text" id="qt-add-desc" placeholder="Custom note…" style="font-size:0.82rem;"/>
+                <textarea id="qt-add-desc" placeholder="Custom note… (press Enter for a new line)" rows="1"
+                  style="font-size:0.82rem;width:100%;background:var(--bg3);border:1px solid var(--border2);padding:8px 10px;color:var(--text);font-family:var(--sans);outline:none;resize:vertical;min-height:34px;"></textarea>
               </div>
               <button class="qa-btn" onclick="qtAddLineItem()" style="padding:8px 16px; white-space:nowrap; flex-shrink:0;">+ Add</button>
             </div>
@@ -3747,7 +3748,7 @@ body.app-running #screen-app   { display:flex !important; }
               <span style="font-family:var(--mono); font-size:0.6rem; color:var(--text-muted); white-space:nowrap;">OR ADD FREE-TEXT:</span>
               <input type="text" id="qt-add-freetext-name" placeholder="Item / service name" style="flex:2; min-width:160px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
               <input type="text" id="qt-add-freetext-model" placeholder="Model" style="width:110px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
-              <input type="text" id="qt-add-freetext-desc" placeholder="Description (optional)" style="flex:1; min-width:120px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <textarea id="qt-add-freetext-desc" placeholder="Description (optional) — Enter for new line" rows="1" style="flex:1; min-width:120px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none; font-family:var(--sans); resize:vertical; min-height:28px;"></textarea>
               <input type="number" id="qt-add-freetext-qty" value="1" min="1" style="width:60px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
               <input type="number" id="qt-add-freetext-price" value="0" min="0" step="0.01" placeholder="Price" style="width:110px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
               <select id="qt-add-freetext-availability" style="background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;">
@@ -3766,7 +3767,7 @@ body.app-running #screen-app   { display:flex !important; }
                 <option value="__custom__">＋ Custom service…</option>
               </select>
               <input type="text" id="qt-add-service-custom-name" placeholder="Custom service name" style="display:none; flex:1; min-width:160px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
-              <input type="text" id="qt-add-service-desc" placeholder="Description (optional)" style="flex:1; min-width:120px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
+              <textarea id="qt-add-service-desc" placeholder="Description (optional) — Enter for new line" rows="1" style="flex:1; min-width:120px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none; font-family:var(--sans); resize:vertical; min-height:28px;"></textarea>
               <input type="number" id="qt-add-service-qty" value="1" min="1" style="width:60px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
               <input type="number" id="qt-add-service-price" value="0" min="0" step="0.01" placeholder="Price" style="width:110px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
               <input type="text" id="qt-add-service-uom" placeholder="U/M" value="LOT" style="width:70px; background:var(--bg); border:1px solid var(--border2); padding:5px 9px; color:var(--text); font-size:0.78rem; outline:none;"/>
@@ -5311,12 +5312,21 @@ body.app-running #screen-app   { display:flex !important; }
           <option value="">All Branches</option>
         </select>
       </div>
-      <div class="field" style="flex:1;min-width:160px;margin:0;">
-        <label style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:4px;">Month</label>
-        <select id="sps-month-filter" onchange="renderSalesPerStaffTable()"
+      <div class="field" style="flex:1;min-width:140px;margin:0;">
+        <label style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:4px;">Filter By</label>
+        <select id="sps-filter-type" onchange="spsFilterTypeChanged()"
           style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:9px 10px;color:var(--text);font-size:0.8rem;outline:none;">
           <option value="">All Time</option>
+          <option value="day">Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
         </select>
+      </div>
+      <div class="field" id="sps-filter-value-wrap" style="flex:1;min-width:160px;margin:0;display:none;">
+        <label id="sps-filter-value-label" style="font-family:var(--mono);font-size:0.6rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:4px;">Date</label>
+        <input id="sps-filter-value" type="date" onchange="renderSalesPerStaffTable()"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:8px 10px;color:var(--text);font-size:0.8rem;outline:none;"/>
       </div>
     </div>
 
@@ -9121,8 +9131,128 @@ function updateDashSalesTotals() {
 // ════════════════════════════════════════════════════════════
 // Client-side gating for UX; real access control still belongs in Firestore
 // security rules, same caveat as the rest of the app's role-based UI checks.
+//
+// Staff are matched to sales by soldByUid (the account that made the sale),
+// not by the soldBy name text — a sale's soldBy text is a snapshot of the
+// staff member's display name at the moment of the sale, so if that name was
+// ever edited afterwards, older and newer sales for the SAME person can show
+// up under two slightly different name strings. Matching by uid and always
+// displaying the employee's current name from the staff directory fixes that.
 
-function openSalesPerStaffModal() {
+// Ensures HR_ALL_EMPLOYEES is populated even if the Super Admin hasn't
+// visited the Human Resource page yet this session.
+async function ensureStaffRosterLoaded() {
+  if (window.HR_ALL_EMPLOYEES && window.HR_ALL_EMPLOYEES.length) return;
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const snap = await fb.getDocs(fb.collection(fb.db, 'users'));
+    const emps = [];
+    snap.forEach(d => emps.push({ id: d.id, ...d.data() }));
+    window.HR_ALL_EMPLOYEES = emps;
+    HR_ALL_EMPLOYEES = emps;
+  } catch (e) {
+    console.warn('ensureStaffRosterLoaded failed:', e);
+  }
+}
+
+// Converts an ISO week string ('2026-W38') into its Monday–Sunday date range.
+function isoWeekToDateRange(value) {
+  const [yearStr, weekStr] = value.split('-W');
+  const year = parseInt(yearStr, 10);
+  const week = parseInt(weekStr, 10);
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = (jan4.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const week1Monday = new Date(jan4);
+  week1Monday.setDate(jan4.getDate() - jan4Day);
+  const start = new Date(week1Monday);
+  start.setDate(week1Monday.getDate() + (week - 1) * 7);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+// Reads the current Filter By type + value and returns a { start, end, label }
+// date range, or nulls for "All Time".
+function getSpsDateRange() {
+  const type = document.getElementById('sps-filter-type')?.value || '';
+  const val = document.getElementById('sps-filter-value')?.value || '';
+  if (!type || !val) return { start: null, end: null, label: 'All Time' };
+
+  if (type === 'day') {
+    const d = new Date(val + 'T00:00:00');
+    if (isNaN(d.getTime())) return { start: null, end: null, label: 'All Time' };
+    const start = new Date(d); start.setHours(0, 0, 0, 0);
+    const end = new Date(d); end.setHours(23, 59, 59, 999);
+    return { start, end, label: d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) };
+  }
+  if (type === 'week') {
+    const { start, end } = isoWeekToDateRange(val);
+    const label = `Week of ${start.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    return { start, end, label };
+  }
+  if (type === 'month') {
+    const [y, m] = val.split('-').map(Number);
+    const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
+    const end = new Date(y, m, 0, 23, 59, 59, 999);
+    return { start, end, label: start.toLocaleDateString('en-PH', { year: 'numeric', month: 'long' }) };
+  }
+  if (type === 'year') {
+    const y = parseInt(val, 10);
+    const start = new Date(y, 0, 1, 0, 0, 0, 0);
+    const end = new Date(y, 11, 31, 23, 59, 59, 999);
+    return { start, end, label: String(y) };
+  }
+  return { start: null, end: null, label: 'All Time' };
+}
+
+// Swaps the Filter By value input between date/week/month/year, defaulting
+// to the current day/week/month/year, then re-renders.
+function spsFilterTypeChanged() {
+  const type = document.getElementById('sps-filter-type').value;
+  const wrap = document.getElementById('sps-filter-value-wrap');
+  const input = document.getElementById('sps-filter-value');
+  const labelEl = document.getElementById('sps-filter-value-label');
+  if (!wrap || !input || !labelEl) return;
+
+  if (!type) {
+    wrap.style.display = 'none';
+    input.value = '';
+    renderSalesPerStaffTable();
+    return;
+  }
+
+  wrap.style.display = 'block';
+  const now = new Date();
+  if (type === 'day') {
+    input.type = 'date';
+    labelEl.textContent = 'Date';
+    input.value = now.toISOString().slice(0, 10);
+  } else if (type === 'week') {
+    input.type = 'week';
+    labelEl.textContent = 'Week';
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); // nearest Thursday
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    const weekNo = 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+    input.value = `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+  } else if (type === 'month') {
+    input.type = 'month';
+    labelEl.textContent = 'Month';
+    input.value = now.toISOString().slice(0, 7);
+  } else if (type === 'year') {
+    input.type = 'number';
+    input.min = '2000'; input.max = '2100'; input.step = '1';
+    labelEl.textContent = 'Year';
+    input.value = String(now.getFullYear());
+  }
+  renderSalesPerStaffTable();
+}
+
+async function openSalesPerStaffModal() {
   if (window._currentRole !== 'super') {
     showToast('⚠ Only a superadmin can view sales per staff.');
     return;
@@ -9138,23 +9268,13 @@ function openSalesPerStaffModal() {
     if (names.includes(prevVal)) branchSel.value = prevVal;
   }
 
-  // Populate month filter from the actual months present in SALES_LOG
-  const monthSel = document.getElementById('sps-month-filter');
-  if (monthSel) {
-    const prevVal = monthSel.value;
-    const monthMap = {}; // 'YYYY-MM' -> display label, e.g. 'September 2026'
-    (SALES_LOG || []).forEach(tx => {
-      const d = tx.date ? new Date(tx.date) : null;
-      if (!d || isNaN(d.getTime())) return;
-      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-      if (!monthMap[key]) monthMap[key] = d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long' });
-    });
-    const keys = Object.keys(monthMap).sort().reverse(); // newest first
-    monthSel.innerHTML = '<option value="">All Time</option>' +
-      keys.map(k => `<option value="${k}">${monthMap[k]}</option>`).join('');
-    if (keys.includes(prevVal)) monthSel.value = prevVal;
-  }
+  // Reset the date filter to "All Time" each time the modal is opened
+  const filterTypeSel = document.getElementById('sps-filter-type');
+  if (filterTypeSel) filterTypeSel.value = '';
+  const filterValueWrap = document.getElementById('sps-filter-value-wrap');
+  if (filterValueWrap) filterValueWrap.style.display = 'none';
 
+  await ensureStaffRosterLoaded();
   renderSalesPerStaffTable();
   document.getElementById('modal-sales-per-staff').classList.add('active');
 }
@@ -9171,48 +9291,83 @@ function renderSalesPerStaffTable() {
   if (!tbody) return;
 
   const branchFilter = document.getElementById('sps-branch-filter')?.value || '';
-  const monthFilter = document.getElementById('sps-month-filter')?.value || ''; // 'YYYY-MM' or ''
+  const { start, end, label: periodLabel } = getSpsDateRange();
 
   let sales = (SALES_LOG || []).filter(tx => !tx.voided);
-
   if (branchFilter) sales = sales.filter(tx => tx.branch === branchFilter);
-
-  if (monthFilter) {
+  if (start && end) {
     sales = sales.filter(tx => {
       const d = tx.date ? new Date(tx.date) : null;
-      if (!d || isNaN(d.getTime())) return false;
-      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-      return key === monthFilter;
+      return d && !isNaN(d.getTime()) && d >= start && d <= end;
     });
   }
 
-  const byStaff = {};
+  // Sales totals keyed by the account that made the sale (falls back to a
+  // name-based key only for old records saved before soldByUid existed).
+  const salesByKey = {};
   sales.forEach(tx => {
-    const name = tx.soldBy || 'Unknown';
-    if (!byStaff[name]) byStaff[name] = { total: 0, count: 0 };
-    byStaff[name].total += (tx.total || 0);
-    byStaff[name].count += 1;
+    const key = tx.soldByUid || ('name:' + (tx.soldBy || 'Unknown'));
+    if (!salesByKey[key]) salesByKey[key] = { total: 0, count: 0 };
+    salesByKey[key].total += (tx.total || 0);
+    salesByKey[key].count += 1;
   });
 
-  const staffNames = Object.keys(byStaff).sort((a, b) => byStaff[b].total - byStaff[a].total);
+  // Full staff roster grouped by branch — every employee shows up, even with
+  // zero sales, not just the ones who happened to make a sale.
+  const roster = (window.HR_ALL_EMPLOYEES || []).filter(emp => !branchFilter || emp.branch === branchFilter);
+  const byBranch = {};
+  const consumedKeys = new Set();
+  roster.forEach(emp => {
+    const br = emp.branch || 'Unassigned Branch';
+    const name = emp.fullName || emp.displayName || (emp.email ? emp.email.split('@')[0] : 'Unknown');
+    const stat = salesByKey[emp.id] || { total: 0, count: 0 };
+    consumedKeys.add(emp.id);
+    if (!byBranch[br]) byBranch[br] = [];
+    byBranch[br].push({ name, total: stat.total, count: stat.count });
+  });
+
+  // Sales tied to an account not in the current staff roster (e.g. a removed
+  // account, or a sale recorded before soldByUid existed) are still shown,
+  // grouped under the branch the sale was made in, so totals never silently
+  // drop transactions.
+  const seenLeftoverKeys = new Set();
+  sales.forEach(tx => {
+    const key = tx.soldByUid || ('name:' + (tx.soldBy || 'Unknown'));
+    if (consumedKeys.has(key) || seenLeftoverKeys.has(key)) return;
+    seenLeftoverKeys.add(key);
+    const br = tx.branch || 'Unassigned Branch';
+    const name = (tx.soldBy || 'Unknown') + ' (not on current staff list)';
+    if (!byBranch[br]) byBranch[br] = [];
+    byBranch[br].push({ name, total: salesByKey[key].total, count: salesByKey[key].count });
+  });
+
+  const branchNames = Object.keys(byBranch).sort();
+  const totalStaff = branchNames.reduce((s, br) => s + byBranch[br].length, 0);
 
   if (noteEl) {
     const branchLbl = branchFilter || 'All Branches';
-    const monthLbl = document.getElementById('sps-month-filter')?.selectedOptions?.[0]?.textContent || 'All Time';
-    noteEl.textContent = `${branchLbl} · ${monthLbl} · ${staffNames.length} staff · ${sales.length} transaction(s)`;
+    noteEl.textContent = `${branchLbl} · ${periodLabel} · ${totalStaff} staff · ${sales.length} transaction(s)`;
   }
 
-  if (staffNames.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">◇<br><br>NO SALES FOUND FOR THIS FILTER</td></tr>`;
+  if (branchNames.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;">◇<br><br>NO STAFF FOUND FOR THIS FILTER</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = staffNames.map(name => `
-    <tr>
-      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);font-size:0.8rem;">${name}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:center;font-family:var(--mono);font-size:0.76rem;color:var(--text-muted);">${byStaff[name].count}</td>
-      <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:right;font-family:var(--mono);font-size:0.82rem;color:var(--green);font-weight:600;">₱${fmt(byStaff[name].total)}</td>
-    </tr>`).join('');
+  tbody.innerHTML = branchNames.map(br => {
+    const rows = byBranch[br].sort((a, b) => b.total - a.total);
+    const branchHeader = `
+      <tr>
+        <td colspan="3" style="padding:8px 12px;background:var(--bg3);border-bottom:1px solid var(--border2);font-family:var(--mono);font-size:0.66rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--red);">${br}</td>
+      </tr>`;
+    const staffRows = rows.map(r => `
+      <tr>
+        <td style="padding:9px 12px 9px 22px;border-bottom:1px solid var(--border2);font-size:0.8rem;">${r.name}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:center;font-family:var(--mono);font-size:0.76rem;color:var(--text-muted);">${r.count}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:right;font-family:var(--mono);font-size:0.82rem;color:var(--green);font-weight:600;">₱${fmt(r.total)}</td>
+      </tr>`).join('');
+    return branchHeader + staffRows;
+  }).join('');
 }
 
 // ════════════════════════════════════════════════════════════
@@ -17836,23 +17991,23 @@ async function transferSerials(p, serialIds, toBranch) {
 }
 
 // ── Transfer Requests — approval workflow ────────────────────────
-// A transfer only actually moves stock once the destination branch's admin
-// (or a superadmin, who can act for any branch) approves it here.
+// Only a Superadmin can approve or reject a transfer request. Admins can
+// create requests and view them (their own outgoing requests, and incoming
+// ones for their branch), but never act on them.
 
 function canReviewTransferRequest(req) {
-  if (window._currentRole === 'super') return true;
-  if (window._currentRole === 'admin') return req.toBranch === window._currentUserBranch;
+  return window._currentRole === 'super';
+}
+
+// Admins can see requests relevant to their branch — either one they
+// requested (fromBranch) or one coming into their branch (toBranch) — but
+// only in read-only mode; see canReviewTransferRequest for who can act.
+function canViewTransferRequest(req) {
+  if (canReviewTransferRequest(req)) return true;
+  if (window._currentRole === 'admin') return req.fromBranch === window._currentUserBranch || req.toBranch === window._currentUserBranch;
   return false;
 }
 
-// Broader than canReviewTransferRequest: also lets the *requesting* branch's
-// admin see the request (read-only — they can't approve/reject their own
-// outgoing transfer, only the receiving branch's admin or a superadmin can).
-function canViewTransferRequest(req) {
-  if (canReviewTransferRequest(req)) return true;
-  if (window._currentRole === 'admin') return req.fromBranch === window._currentUserBranch;
-  return false;
-}
 
 // Updates the "🔔 Transfer Requests" button's visibility and pending-count
 // badge in the Inventory page header.
@@ -17942,7 +18097,7 @@ function renderTransferRequestsTable(requests) {
         <button onclick="rejectTransferRequest('${r.id}', this)"
           style="background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);">REJECT</button>
         ` : `
-        <span style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.05em;color:var(--text-muted);text-transform:uppercase;">Awaiting ${r.toBranch} admin</span>
+        <span style="font-family:var(--mono);font-size:0.62rem;letter-spacing:0.05em;color:var(--text-muted);text-transform:uppercase;">Awaiting Superadmin approval</span>
         `}
       </td>
     </tr>`;
@@ -17963,7 +18118,7 @@ async function approveTransferRequest(reqId, btn) {
     if (!snap.exists()) { showToast('⚠ Request no longer exists.'); loadTransferRequests(); return; }
     const req = { id: reqId, ...snap.data() };
     if (req.status !== 'pending') { showToast('This request has already been reviewed.'); loadTransferRequests(); return; }
-    if (!canReviewTransferRequest(req)) { showToast('⚠ Only an admin at ' + req.toBranch + ' (or a superadmin) can approve this.'); return; }
+    if (!canReviewTransferRequest(req)) { showToast('⚠ Only a superadmin can approve this.'); return; }
 
     // Ensure PRICELIST has the freshest product data before moving stock.
     let p = PRICELIST.find(x => x.id === req.prodId);
@@ -18007,7 +18162,7 @@ async function rejectTransferRequest(reqId, btn) {
     if (!snap.exists()) { showToast('⚠ Request no longer exists.'); loadTransferRequests(); return; }
     const req = { id: reqId, ...snap.data() };
     if (req.status !== 'pending') { showToast('This request has already been reviewed.'); loadTransferRequests(); return; }
-    if (!canReviewTransferRequest(req)) { showToast('⚠ Only an admin at ' + req.toBranch + ' (or a superadmin) can reject this.'); return; }
+    if (!canReviewTransferRequest(req)) { showToast('⚠ Only a superadmin can reject this.'); return; }
 
     const reason = window.prompt('Reason for rejecting this transfer (optional):') || '';
 
@@ -20801,6 +20956,7 @@ function qtRenderItemsTable() {
     tbody.innerHTML = '<tr id="qt-empty-row"><td colspan="10" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.72rem;color:var(--text-muted);">No items added yet</td></tr>';
     return;
   }
+  const escHtmlBody = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const availOptions = ['AVAILABLE','LIMITED STOCK','PRE-ORDER','OUT OF STOCK'];
   tbody.innerHTML = _qtLineItems.map((it, i) => `
     <tr>
@@ -20811,8 +20967,8 @@ function qtRenderItemsTable() {
           oninput="_qtLineItems[${i}].model=this.value;"/>
       </td>
       <td>
-        <input type="text" value="${it.desc||''}" placeholder="Description" style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.76rem;outline:none;"
-          oninput="_qtLineItems[${i}].desc=this.value;"/>
+        <textarea placeholder="Description — Enter for new line" rows="2" style="width:100%;min-width:140px;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.76rem;font-family:var(--sans);outline:none;resize:vertical;"
+          oninput="_qtLineItems[${i}].desc=this.value;">${escHtmlBody(it.desc||'')}</textarea>
       </td>
       <td>
         <select style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.72rem;outline:none;"
@@ -21060,15 +21216,15 @@ async function viewQuotation(firestoreId) {
             <td style="font-family:var(--mono);font-size:0.76rem;">${it.model||'—'}</td>
             <td style="color:var(--text-muted);font-size:0.78rem;min-width:160px;">
               ${canEditDesc ? `
-              <div style="display:flex;align-items:center;gap:4px;">
-                <span class="qt-desc-view" id="qt-desc-view-${i}" style="flex:1;">${it.desc||'—'}</span>
-                <input type="text" id="qt-desc-input-${i}" value="${escAttr(it.desc)}" placeholder="Description"
-                  style="display:none;flex:1;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;outline:none;"/>
+              <div style="display:flex;align-items:flex-start;gap:4px;">
+                <span class="qt-desc-view" id="qt-desc-view-${i}" style="flex:1;white-space:pre-line;">${it.desc||'—'}</span>
+                <textarea id="qt-desc-input-${i}" placeholder="Description" rows="2"
+                  style="display:none;flex:1;background:var(--bg3);border:1px solid var(--border2);padding:3px 5px;color:var(--text);font-size:0.78rem;font-family:var(--sans);outline:none;resize:vertical;">${escAttr(it.desc)}</textarea>
                 <button id="qt-desc-editbtn-${i}" onclick="qtToggleDescEdit(${i})" title="Edit description"
                   style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:0.82rem;padding:2px 4px;">✎</button>
                 <button id="qt-desc-savebtn-${i}" onclick="qtSaveDescEdit('${firestoreId}', ${i})" title="Save description" style="display:none;background:none;border:none;cursor:pointer;color:var(--green);font-size:0.82rem;padding:2px 4px;">💾</button>
                 <button id="qt-desc-cancelbtn-${i}" onclick="qtCancelDescEdit(${i})" title="Cancel" style="display:none;background:none;border:none;cursor:pointer;color:var(--red);font-size:0.82rem;padding:2px 4px;">✕</button>
-              </div>` : (it.desc||'—')}
+              </div>` : `<span style="white-space:pre-line;">${it.desc||'—'}</span>`}
             </td>
             <td style="font-size:0.78rem;">${it.availability||'AVAILABLE'}</td>
             <td style="text-align:right;font-family:var(--mono);">${it.qty}</td>
