@@ -667,9 +667,22 @@ window.SALES_ACTIVE_CHUNK = [];
       // warning — pointing straight at the fix-it tool — instead of letting
       // a stuck "sold" serial go unnoticed until someone happens to open
       // Inventory → Check Voided Sale Restock.
-      restockVoidedSaleSerials(tx.raw || {}).then(async () => {
+      // Mark this sale's Incomplete Items records as Voided too (best-effort).
+      if (typeof voidIncompleteItemsForSale === 'function') {
+        voidIncompleteItemsForSale(firestoreId, tx, actor, reason);
+      }
+
+      // Use the freshest copy of the sale for the restock, so lines completed
+      // (or still incomplete) from another session are treated correctly.
+      let rawForRestock = tx.raw || {};
+      try {
+        const freshSnap = await fb.getDoc(fb.doc(fb.db, 'sales', firestoreId));
+        if (freshSnap.exists()) rawForRestock = { ...freshSnap.data() };
+      } catch (e) { console.warn('Could not re-read sale before restock; using cached copy.', e); }
+
+      restockVoidedSaleSerials(rawForRestock).then(async () => {
         try {
-          const serialItems = (tx.raw?.items || []).filter(it => it.prodId && it.serials && it.serials.length);
+          const serialItems = (rawForRestock.items || []).filter(it => it.prodId && it.serials && it.serials.length);
           if (!serialItems.length) return;
           let stuck = 0;
           for (const it of serialItems) {
@@ -816,6 +829,9 @@ window.SALES_ACTIVE_CHUNK = [];
 
     for (const it of rawSale.items) {
       if (!it.prodId) continue;
+      // A line still marked Incomplete was never deducted from inventory, so
+      // there is nothing to put back (restocking it would inflate stock).
+      if (it.incomplete) continue;
 
       if (!it.serials || !it.serials.length) {
         // Quantity-based product (no serial numbers) — add the sold qty
@@ -5112,8 +5128,9 @@ body.app-running #screen-app   { display:flex !important; }
             style="flex:1;min-width:180px;" oninput="renderIncompleteItemsTable()"/>
           <select id="incomplete-status-filter" onchange="renderIncompleteItemsTable()">
             <option value="pending">Pending Only</option>
-            <option value="all">All (Pending + Completed)</option>
+            <option value="all">All (Pending + Completed + Voided)</option>
             <option value="completed">Completed Only</option>
+            <option value="voided">Voided Only</option>
           </select>
           <button class="qa-btn" id="incomplete-repair-btn" style="padding:8px 14px;font-size:0.68rem;white-space:nowrap;" onclick="repairAllMissingIncompleteItemRecords()" title="Scans recent sales for lines marked Incomplete that never got a tracking record here (e.g. from a past permissions issue) and recreates them.">🔧 Repair Missing Records</button>
         </div>
@@ -6595,11 +6612,11 @@ function initApp(){
   const avatarEl = document.getElementById('prof-avatar');
   if(avatarEl) avatarEl.textContent = initials;
 
-  // Nav locking — users can't see Branches. Inventory is now viewable by everyone
+  // Nav locking — users can't see Branches or Stock Transfer. Inventory is now viewable by everyone
   // (user/admin/super) in read-only mode — see renderProductTable(), which hides the
   // Add/Edit/Delete controls and shows "View only" for anyone below Admin.
   // Human Resource is likewise viewable by everyone; only Super Admin can edit within it.
-  ['nav-branches'].forEach(id => {
+  ['nav-branches', 'nav-stocktransfer'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('locked', currentRole === 'user');
   });
@@ -8998,6 +9015,7 @@ async function repairAllMissingIncompleteItemRecords(){
     let scanned = 0, repairedTotal = 0, salesRepaired = 0;
     for(const doc of snap.docs){
       const data = doc.data();
+      if(data.voided) continue;
       scanned++;
       const saleLike = { id: data.id || doc.id, items: data.items||[], slipNo: data.slipNo, customer: data.customer, branch: data.branch, soldBy: data.soldBy, soldByUid: data.soldByUid };
       const before = INCOMPLETE_ITEMS.length;
@@ -9031,6 +9049,7 @@ async function repairAllMissingIncompleteItemRecords(){
 // anyone views it — no manual data-fixing needed.
 async function repairMissingIncompleteItemRecords(firestoreId, saleLike){
   const fb = window._fb;
+  if(saleLike && saleLike.voided) return [];   // never (re)create tracking records for a voided sale
   const incompleteIdx = (saleLike.items||[])
     .map((it,idx)=>({it,idx}))
     .filter(x=>x.it && x.it.incomplete)
@@ -12958,6 +12977,15 @@ const PAGE_TITLES = {
 };
 function showPage(name, el){
   if(el && el.classList.contains('locked')){
+    showToast('Access restricted — Admin or Super Admin required.');
+    return;
+  }
+  // Stock Transfer is Admin/Super only. The 'locked' class above blocks a
+  // click on the nav item itself, but this blocks any other way in too —
+  // a stale/cached nav element, a direct showPage('stocktransfer') call, a
+  // deep link, etc. — so a plain 'user' role can never load transfer data
+  // or reach the "+ New Transfer" button regardless of entry point.
+  if(name === 'stocktransfer' && window._currentRole === 'user'){
     showToast('Access restricted — Admin or Super Admin required.');
     return;
   }
@@ -18297,6 +18325,7 @@ function stItemsSummary(items){
 
 // ── Page load ──
 async function loadStockTransferPage(){
+  if(window._currentRole === 'user'){ showToast('⚠ Access restricted — Admin or Super Admin required.'); return; }
   const tbody = document.getElementById('st-tbody');
   if(tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING…</td></tr>`;
   ensureBranchesCacheLoaded();
@@ -18432,6 +18461,7 @@ function populateStockTransferBranchSelects(){
 }
 
 function openStockTransferModal(){
+  if(window._currentRole === 'user'){ showToast('⚠ Access restricted — Admin or Super Admin required.'); return; }
   const branchList = populateStockTransferBranchSelects();
   if(branchList.length < 2){
     showToast('Need at least 2 branches to transfer stock between. Add one in Branch Management first.');
@@ -18460,6 +18490,7 @@ function closeStockTransferModal(){
 // Stock Transfer module with a fresh transfer pre-loaded with this product,
 // instead of moving stock inline right there.
 function openStockTransferFromInventory(prodId){
+  if(window._currentRole === 'user'){ showToast('⚠ Access restricted — Admin or Super Admin required.'); return; }
   const p = (window.PRICELIST || []).find(x => x.id === prodId);
   if(!p){ showToast('Could not find this item.'); return; }
   _stPrefillFromInventory = { prodId: p.id, prodName: p.name, model: p.model || '', hasSerials: !!p.hasSerials };
@@ -18610,6 +18641,7 @@ function renderStockTransferItems(){
 
 // ── Submit ──
 async function submitStockTransfer(){
+  if(window._currentRole === 'user'){ showToast('⚠ Access restricted — Admin or Super Admin required.'); return; }
   if(_stSubmitInProgress) return;
   const fromBranch = document.getElementById('st-from-branch')?.value || '';
   const toBranch = document.getElementById('st-to-branch')?.value || '';
@@ -18621,16 +18653,28 @@ async function submitStockTransfer(){
   if(!stItems.length){ showToast('Add at least one item to transfer.'); return; }
 
   const finalItems = [];
+  const seenSerialIds = new Set();     // catches the same serial picked on two different lines
+  const qtyTotalsByProduct = new Map(); // prodId -> combined qty across every non-serial line for it
   for(const item of stItems){
     if(!item.prodId){ showToast('Every item needs a product selected.'); return; }
     if(item.hasSerials){
       if(!(item.serialIds || []).length){ showToast(`Select at least one serial for ${item.prodName}.`); return; }
+      for(const sid of item.serialIds){
+        if(seenSerialIds.has(sid)){ showToast(`A serial for ${item.prodName} is selected on more than one line — pick each serial only once.`); return; }
+        seenSerialIds.add(sid);
+      }
       const serialNumbers = item.serialIds.map(id => (item.serialOptions || []).find(s => s.id === id)?.serial || id);
       finalItems.push({ prodId: item.prodId, prodName: item.prodName, model: item.model || '', hasSerials: true, qty: item.serialIds.length, serialIds: item.serialIds, serialNumbers });
     } else {
       const qty = parseInt(item.qty) || 0;
       if(qty <= 0){ showToast(`Enter a quantity to transfer for ${item.prodName}.`); return; }
       if(qty > (item.avail || 0)){ showToast(`Only ${item.avail || 0} unit(s) of ${item.prodName} available at ${fromBranch}.`); return; }
+      // Two lines of the same non-serial product must not individually pass
+      // against the same starting availability while their SUM exceeds it —
+      // check the running combined total for this product too.
+      const combinedSoFar = (qtyTotalsByProduct.get(item.prodId) || 0) + qty;
+      if(combinedSoFar > (item.avail || 0)){ showToast(`${item.prodName} is split across multiple lines totalling ${combinedSoFar}, but only ${item.avail || 0} unit(s) are available at ${fromBranch}.`); return; }
+      qtyTotalsByProduct.set(item.prodId, combinedSoFar);
       finalItems.push({ prodId: item.prodId, prodName: item.prodName, model: item.model || '', hasSerials: false, qty, serialIds: [], serialNumbers: [] });
     }
   }
@@ -18668,57 +18712,132 @@ async function submitStockTransfer(){
 }
 
 // ── Approve / Reject ──
-// Moves the actual stock (reusing transferQty/transferSerials — the same
-// functions the old inline panel used) only once every line item has been
-// verified against live inventory, so a transfer never gets half-applied.
+// FIX (was: reused transferQty/transferSerials, which computed new branch
+// numbers from the browser's PRICELIST cache — loaded once at app start and
+// never refreshed — then overwrote the whole `branches` map with no
+// transaction. Since transfers can sit pending for a long time, anything
+// else that touched that product's stock in the meantime (a sale, a
+// received PO, another approved transfer) got silently wiped out by that
+// overwrite, and two approvals on the same product could race. A transfer
+// with the same product on two separate line items also passed pre-flight
+// individually even when their COMBINED qty exceeded what was in stock,
+// crediting the destination with more units than the origin ever had.)
+//
+// Everything below now runs inside ONE Firestore transaction: it aggregates
+// every line item by product first (so duplicate-product lines are checked
+// against their combined total, not independently), re-reads each product's
+// (and serial's) CURRENT state live from Firestore inside the transaction,
+// validates against that live data, and only then writes. The transfer
+// document's own status is read and flipped inside the same transaction, so
+// two admins approving/rejecting the same transfer at once can't both
+// succeed — Firestore will retry/fail the loser automatically. Either the
+// whole transfer applies, or nothing does.
 async function approveStockTransfer(id, btn){
   if(_stReviewInProgress.has(id)){ showToast('Already processing — please wait.'); return; }
   const fb = window._fb;
   if(!fb) return;
+  if(!canReviewStockTransfer()){ showToast('⚠ Only a superadmin can approve this.'); return; }
   _stReviewInProgress.add(id);
   if(btn) btn.disabled = true;
+
+  const reviewedBy = window._currentFirebaseUser?.displayName || document.getElementById('tb-user')?.textContent || 'Staff';
+
   try {
-    const snap = await fb.getDoc(fb.doc(fb.db, 'stockTransfers', id));
-    if(!snap.exists()){ showToast('⚠ Transfer no longer exists.'); loadStockTransferPage(); return; }
-    const t = normalizeStockTransferRecord(id, snap.data());
-    if(t.status !== 'pending'){ showToast('This transfer has already been reviewed.'); loadStockTransferPage(); return; }
-    if(!canReviewStockTransfer()){ showToast('⚠ Only a superadmin can approve this.'); return; }
+    const transferRef = fb.doc(fb.db, 'stockTransfers', id);
 
-    // Pre-flight: resolve every product and check quantities BEFORE moving
-    // anything, so an approval never applies only half a transfer.
-    const resolved = [];
-    for(const it of t.items){
-      const p = PRICELIST.find(x => x.id === it.prodId);
-      if(!p){ showToast(`⚠ Cannot approve — "${it.prodName}" no longer exists in Inventory.`); return; }
-      if(!it.hasSerials){
-        const avail = (p.branches && p.branches[t.fromBranch] !== undefined) ? (parseInt(p.branches[t.fromBranch]) || 0) : 0;
-        if(avail < it.qty){ showToast(`⚠ Cannot approve — only ${avail} unit(s) of ${it.prodName} left at ${t.fromBranch} (transfer needs ${it.qty}).`); return; }
-      } else {
-        const stillInStock = await getInStockSerialsForBranch(p, t.fromBranch);
-        const missing = it.serialIds.filter(sid => !stillInStock.some(s => s.id === sid));
-        if(missing.length){ showToast(`⚠ Cannot approve — ${missing.length} of the selected serial(s) for ${it.prodName} are no longer in stock at ${t.fromBranch}.`); return; }
+    const approvedTransfer = await fb.runTransaction(fb.db, async (tx) => {
+      const tSnap = await tx.get(transferRef);
+      if(!tSnap.exists()) throw Object.assign(new Error('Transfer no longer exists.'), {code:'NOT_FOUND'});
+      const raw = tSnap.data();
+      if((raw.status || 'pending') !== 'pending') throw Object.assign(new Error('This transfer has already been reviewed.'), {code:'ALREADY_REVIEWED'});
+      const t = normalizeStockTransferRecord(id, raw);
+
+      // Aggregate every line item by product — two lines for the same
+      // product must be validated against their COMBINED requirement.
+      const perProduct = new Map(); // prodId -> { qty, serialIds:Set, name }
+      for(const it of t.items){
+        if(!perProduct.has(it.prodId)) perProduct.set(it.prodId, { qty: 0, serialIds: new Set(), name: it.prodName });
+        const agg = perProduct.get(it.prodId);
+        if(it.hasSerials) (it.serialIds || []).forEach(sid => agg.serialIds.add(sid));
+        else agg.qty += (parseInt(it.qty) || 0);
       }
-      resolved.push({ p, it });
-    }
 
-    for(const { p, it } of resolved){
-      if(it.hasSerials) await transferSerials(p, it.serialIds, t.toBranch);
-      else await transferQty(p, t.fromBranch, t.toBranch, it.qty);
-    }
+      // ── Phase 1 — ALL reads + live validation first (Firestore requires
+      // every tx.get() in a transaction to happen before any tx.update()). ──
+      const stockDocs  = new Map(); // prodId -> { ref, branches }
+      const serialDocs = new Map(); // "prodId::serialId" -> ref
+      for(const [prodId, agg] of perProduct){
+        const stockRef = fb.doc(fb.db, 'stocks', prodId);
+        const stockSnap = await tx.get(stockRef);
+        if(!stockSnap.exists()) throw Object.assign(new Error(`"${agg.name}" no longer exists in Inventory.`), {code:'BAD_ITEM'});
+        const data = stockSnap.data();
+        stockDocs.set(prodId, { ref: stockRef, branches: { ...(data.branches || {}) } });
 
-    await fb.updateDoc(fb.doc(fb.db, 'stockTransfers', id), {
-      status: 'approved',
-      reviewedBy: window._currentFirebaseUser?.displayName || document.getElementById('tb-user')?.textContent || 'Staff',
-      reviewedAt: fb.serverTimestamp()
+        if(agg.qty > 0){
+          const liveAvail = parseInt(data.branches?.[t.fromBranch]) || 0;
+          if(liveAvail < agg.qty) throw Object.assign(new Error(`Only ${liveAvail} unit(s) of ${agg.name} left at ${t.fromBranch} right now (transfer needs ${agg.qty}).`), {code:'BAD_ITEM'});
+        }
+        for(const sid of agg.serialIds){
+          const sRef = fb.doc(fb.db, 'stocks', prodId, 'serials', sid);
+          const sSnap = await tx.get(sRef);
+          const sData = sSnap.exists() ? sSnap.data() : null;
+          if(!sData || sData.status !== 'in_stock' || (sData.branch || '') !== t.fromBranch){
+            throw Object.assign(new Error(`A selected serial for ${agg.name} is no longer in stock at ${t.fromBranch}.`), {code:'BAD_ITEM'});
+          }
+          serialDocs.set(prodId + '::' + sid, sRef);
+        }
+      }
+
+      // ── Phase 2 — every check passed, apply every line item's move. ──
+      for(const [prodId, agg] of perProduct){
+        const { ref, branches } = stockDocs.get(prodId);
+        const totalMoved = agg.qty + agg.serialIds.size;
+        if(totalMoved > 0){
+          branches[t.fromBranch] = Math.max(0, (parseInt(branches[t.fromBranch]) || 0) - totalMoved);
+          branches[t.toBranch]   = (parseInt(branches[t.toBranch]) || 0) + totalMoved;
+          tx.update(ref, { branches });
+        }
+        for(const sid of agg.serialIds){
+          tx.update(serialDocs.get(prodId + '::' + sid), { branch: t.toBranch });
+        }
+      }
+
+      tx.update(transferRef, { status: 'approved', reviewedBy, reviewedAt: fb.serverTimestamp() });
+      return t;
     });
 
-    showToast(`${t.transferNo} approved — stock moved from ${t.fromBranch} to ${t.toBranch}.`);
+    // Sync the client-side PRICELIST cache so Inventory reflects the move
+    // immediately, without waiting for a full page reload to catch up.
+    for(const it of approvedTransfer.items){
+      const p = PRICELIST.find(x => x.id === it.prodId);
+      if(!p) continue;
+      const moved = it.hasSerials ? (it.serialIds || []).length : (parseInt(it.qty) || 0);
+      if(!moved) continue;
+      p.branches = { ...(p.branches || {}) };
+      p.branches[approvedTransfer.fromBranch] = Math.max(0, (parseInt(p.branches[approvedTransfer.fromBranch]) || 0) - moved);
+      p.branches[approvedTransfer.toBranch]   = (parseInt(p.branches[approvedTransfer.toBranch]) || 0) + moved;
+      if(it.hasSerials && Array.isArray(p._serialsList)){
+        (it.serialIds || []).forEach(sid => {
+          const s = p._serialsList.find(x => x.id === sid);
+          if(s) s.branch = approvedTransfer.toBranch;
+        });
+      }
+    }
+
+    showToast(`${approvedTransfer.transferNo} approved — stock moved from ${approvedTransfer.fromBranch} to ${approvedTransfer.toBranch}.`);
     if(typeof renderInventory === 'function') renderInventory();
     closeStockTransferDetail();
     loadStockTransferPage();
   } catch(e){
     console.error('Failed to approve stock transfer', e);
-    showToast('⚠ Could not approve transfer: ' + (e.message || e.code || e));
+    if(e && (e.code === 'ALREADY_REVIEWED' || e.code === 'NOT_FOUND')){
+      showToast(e.message);
+      loadStockTransferPage();
+    } else if(e && e.code === 'BAD_ITEM'){
+      showToast('⚠ Cannot approve — ' + e.message);
+    } else {
+      showToast('⚠ Could not approve transfer: ' + (e.message || e.code || e));
+    }
   } finally {
     _stReviewInProgress.delete(id);
     if(btn) btn.disabled = false;
@@ -18729,29 +18848,40 @@ async function rejectStockTransfer(id, btn){
   if(_stReviewInProgress.has(id)){ showToast('Already processing — please wait.'); return; }
   const fb = window._fb;
   if(!fb) return;
+  if(!canReviewStockTransfer()){ showToast('⚠ Only a superadmin can reject this.'); return; }
   _stReviewInProgress.add(id);
   if(btn) btn.disabled = true;
+
+  const reason = window.prompt('Reason for rejecting this transfer (optional):') || '';
+  const reviewedBy = window._currentFirebaseUser?.displayName || document.getElementById('tb-user')?.textContent || 'Staff';
+
   try {
-    const snap = await fb.getDoc(fb.doc(fb.db, 'stockTransfers', id));
-    if(!snap.exists()){ showToast('⚠ Transfer no longer exists.'); loadStockTransferPage(); return; }
-    const t = normalizeStockTransferRecord(id, snap.data());
-    if(t.status !== 'pending'){ showToast('This transfer has already been reviewed.'); loadStockTransferPage(); return; }
-    if(!canReviewStockTransfer()){ showToast('⚠ Only a superadmin can reject this.'); return; }
+    const transferRef = fb.doc(fb.db, 'stockTransfers', id);
 
-    const reason = window.prompt('Reason for rejecting this transfer (optional):') || '';
-
-    await fb.updateDoc(fb.doc(fb.db, 'stockTransfers', id), {
-      status: 'rejected', rejectReason: reason,
-      reviewedBy: window._currentFirebaseUser?.displayName || document.getElementById('tb-user')?.textContent || 'Staff',
-      reviewedAt: fb.serverTimestamp()
+    // Same reason this is now transactional as approveStockTransfer: reads
+    // and flips the status in one atomic step so a transfer can't be
+    // rejected twice, or rejected by one admin the same instant another
+    // approves it, whichever wins does so cleanly.
+    const rejectedTransfer = await fb.runTransaction(fb.db, async (tx) => {
+      const tSnap = await tx.get(transferRef);
+      if(!tSnap.exists()) throw Object.assign(new Error('Transfer no longer exists.'), {code:'NOT_FOUND'});
+      const raw = tSnap.data();
+      if((raw.status || 'pending') !== 'pending') throw Object.assign(new Error('This transfer has already been reviewed.'), {code:'ALREADY_REVIEWED'});
+      tx.update(transferRef, { status: 'rejected', rejectReason: reason, reviewedBy, reviewedAt: fb.serverTimestamp() });
+      return normalizeStockTransferRecord(id, raw);
     });
 
-    showToast(`${t.transferNo} rejected.`);
+    showToast(`${rejectedTransfer.transferNo} rejected.`);
     closeStockTransferDetail();
     loadStockTransferPage();
   } catch(e){
     console.error('Failed to reject stock transfer', e);
-    showToast('⚠ Could not reject transfer: ' + (e.message || e.code || e));
+    if(e && (e.code === 'ALREADY_REVIEWED' || e.code === 'NOT_FOUND')){
+      showToast(e.message);
+      loadStockTransferPage();
+    } else {
+      showToast('⚠ Could not reject transfer: ' + (e.message || e.code || e));
+    }
   } finally {
     _stReviewInProgress.delete(id);
     if(btn) btn.disabled = false;
@@ -18770,6 +18900,7 @@ function stItemRowsHtml(items){
 }
 
 function openStockTransferDetail(id){
+  if(window._currentRole === 'user'){ showToast('⚠ Access restricted — Admin or Super Admin required.'); return; }
   const t = ST_LOG.find(x => x.id === id);
   if(!t){ showToast('Could not find this transfer.'); return; }
 
@@ -31579,7 +31710,7 @@ window.unloadIncompleteItems = function() {
 function refreshIncompleteItemsBadge(){
   const badge = document.getElementById('badge-incomplete-nav');
   if(!badge) return;
-  const pending = INCOMPLETE_ITEMS.filter(x=>x.status!=='completed').length;
+  const pending = INCOMPLETE_ITEMS.filter(x=>x.status!=='completed' && x.status!=='voided').length;
   badge.textContent = pending;
   badge.style.display = pending > 0 ? 'inline-block' : 'none';
 }
@@ -31593,8 +31724,9 @@ function renderIncompleteItemsTable(){
   const statusFilter = document.getElementById('incomplete-status-filter')?.value || 'pending';
 
   let rows = INCOMPLETE_ITEMS.slice();
-  if(statusFilter === 'pending') rows = rows.filter(x => x.status !== 'completed');
+  if(statusFilter === 'pending') rows = rows.filter(x => x.status !== 'completed' && x.status !== 'voided');
   else if(statusFilter === 'completed') rows = rows.filter(x => x.status === 'completed');
+  else if(statusFilter === 'voided') rows = rows.filter(x => x.status === 'voided');
 
   if(search){
     rows = rows.filter(x =>
@@ -31614,10 +31746,15 @@ function renderIncompleteItemsTable(){
 
   tbody.innerHTML = rows.map(item=>{
     const completed = item.status === 'completed';
-    const statusBadge = completed
+    const voided = item.status === 'voided';
+    const statusBadge = voided
+      ? `<span class="po-status" title="${(item.voidReason||'').replace(/"/g,'&quot;')}" style="background:rgba(107,114,128,0.12);color:#6b7280;text-decoration:line-through;">Voided</span>`
+      : completed
       ? `<span class="po-status approved">Completed</span>`
       : `<span class="po-status pending">Pending</span>`;
-    const manageCell = completed
+    const manageCell = voided
+      ? `<span style="font-family:var(--mono);font-size:0.68rem;color:#6b7280;">✕ Sale voided${item.voidedBy ? ' by '+item.voidedBy : ''}</span>`
+      : completed
       ? `<span style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);">${(item.completedSerials||[]).length ? '🏷 '+item.completedSerials.map(s=>s.serial).join(', ') : '✓ Done'}</span>`
       : (_iiActionInFlight.has(item.id)
         ? `<button disabled style="background:rgba(120,120,120,0.1);color:var(--text-muted);border:1px solid rgba(120,120,120,0.3);padding:6px 14px;cursor:not-allowed;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;opacity:0.6;">Please wait…</button>`
@@ -31670,65 +31807,82 @@ function lockButtonDuring(btnEl, busyLabel){
 }
 
 async function openCompleteIncompleteItem(id, btnEl){
-  // A disabled button shouldn't dispatch click at all, but guard anyway in
-  // case this gets invoked programmatically (e.g. from the Sales panel).
-  if(btnEl && btnEl.disabled) return;
+  // NOTE: do not bail out on btnEl.disabled here. The page-wide double-click
+  // guard (capture-phase listener near the top of the file) disables the
+  // clicked button *before* this inline handler runs, so that check made every
+  // click return silently. Double submits are blocked by _iiActionInFlight.
   if(_iiActionInFlight.has(id)){ showToast('Already processing this item — please wait.'); return; }
 
   const item = INCOMPLETE_ITEMS.find(x=>x.id===id);
-  if(!item){ showToast('Item not found.'); return; }
+  if(!item){ showToast('Item not found.', 5000); return; }
   if(item.status === 'completed'){ showToast('This item was already completed.'); return; }
+  if(item.status === 'voided'){ showToast('This item belongs to a voided sale and can no longer be completed.', 5000); return; }
 
   _iiActionInFlight.add(id);
   const release = lockButtonDuring(btnEl, 'Please wait…');
+  const done = () => { _iiActionInFlight.delete(id); release(); };
 
-  if(!item.hasSerials){
-    const confirmed = confirm(`Mark "${item.prodName}" (qty ${item.qty}) complete and deduct ${item.qty} unit(s) from ${item.branch} stock now?`);
-    if(!confirmed){ _iiActionInFlight.delete(id); release(); return; }
-    try {
-      await finalizeIncompleteItemNoSerial(item);
-    } finally {
-      _iiActionInFlight.delete(id);
-      release();
+  try {
+    // Inventory is loaded lazily elsewhere; make sure it's there before we
+    // try to look the product up (otherwise the lookup below fails silently).
+    if(typeof stocksLoaded !== 'undefined' && !stocksLoaded && typeof loadStocksFromFirestore === 'function'){
+      await loadStocksFromFirestore();
     }
-    return;
-  }
 
-  const prod = PRICELIST.find(p=>p.id===item.prodId);
-  if(!prod){ showToast('This product was not found in the current Inventory list.'); _iiActionInFlight.delete(id); release(); return; }
-
-  _iiCompletingId = id;
-  _iiSelectedIds  = [];
-  document.getElementById('ii-subtitle').textContent = `${item.prodName} · ${item.branch}  ·  Choose ${item.qty} serial number(s)`;
-  document.getElementById('ii-search').value = '';
-  document.getElementById('ii-list').innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING SERIALS…</div>`;
-  document.getElementById('modal-ii-serial').classList.add('active');
-
-  const fb = window._fb;
-  try{
-    let all;
-    if(!fb || String(prod.id).startsWith('local')){
-      all = (prod._serialsList||[]).map((s,i)=>({ id: 'local-'+i, serial: s.serial||s, status: s.status||'in_stock', branch: s.branch||'' }));
-    } else {
-      const snap = await fb.getDocs(fb.collection(fb.db,'stocks',prod.id,'serials'));
-      all = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+    if(!item.hasSerials){
+      const confirmed = confirm(`Mark "${item.prodName}" (qty ${item.qty}) complete and deduct ${item.qty} unit(s) from ${item.branch} stock now?`);
+      if(!confirmed){ done(); return; }
+      try { await finalizeIncompleteItemNoSerial(item); } finally { done(); }
+      return;
     }
-    _iiAvailable = all.filter(s => s.branch === item.branch && s.status === 'in_stock');
+
+    // Find the product by id first, then fall back to name + model in case the
+    // inventory record was re-created and its id changed since the sale.
+    const norm = v => String(v||'').trim().toLowerCase();
+    let prod = PRICELIST.find(p=>p.id===item.prodId)
+            || PRICELIST.find(p=>norm(p.name)===norm(item.prodName) && norm(p.model)===norm(item.model))
+            || PRICELIST.find(p=>norm(p.name)===norm(item.prodName));
+    if(!prod){
+      showToast('This product was not found in the current Inventory list. Add it (with its serial numbers) in Inventory first.', 6000);
+      return;
+    }
+    if(prod.id !== item.prodId) item.prodId = prod.id;
+
+    _iiCompletingId = id;
+    _iiSelectedIds  = [];
+    _iiAvailable    = [];
+    document.getElementById('ii-subtitle').textContent = `${item.prodName} · ${item.branch}  ·  Choose ${item.qty} serial number(s)`;
+    document.getElementById('ii-search').value = '';
+    document.getElementById('ii-list').innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING SERIALS…</div>`;
+    document.getElementById('modal-ii-serial').classList.add('active');
+
+    {
+      const fb = window._fb;
+      try{
+        let all;
+        if(!fb || String(prod.id).startsWith('local')){
+          all = (prod._serialsList||[]).map((s,i)=>({ id: 'local-'+i, serial: s.serial||s, status: s.status||'in_stock', branch: s.branch||'' }));
+        } else {
+          const snap = await fb.getDocs(fb.collection(fb.db,'stocks',prod.id,'serials'));
+          all = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+        }
+        _iiAvailable = all.filter(s => s.branch === item.branch && s.status === 'in_stock');
+      } catch(e){
+        console.error('Failed to load serials for Incomplete Items picker:', e);
+        showToast('⚠ Could not load the serial list — please try again.', 6000);
+      }
+    }
+    renderIICompletePickerBody();
   } catch(e){
-    console.error('Failed to load serials for Incomplete Items picker:', e);
-    document.getElementById('ii-list').innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:#ef5350;">FAILED TO LOAD SERIAL DATA</div>`;
-    _iiActionInFlight.delete(id);
-    release();
-    return;
+    console.error('openCompleteIncompleteItem failed:', e);
+    showToast('⚠ Could not open the serial picker: ' + (e.message || e), 7000);
+    const m = document.getElementById('modal-ii-serial'); if(m) m.classList.remove('active');
+  } finally {
+    // Picker is open and interactive now — release the row-button lock. The
+    // double-submit protection lives on the picker's Complete button and in
+    // the Firestore transaction itself.
+    _iiActionInFlight.delete(id); release();
   }
-  renderIICompletePickerBody();
-  // The picker is open and interactive now — release the row-button lock.
-  // The remaining protection against a double submission lives on the
-  // picker's own "Complete Item" button (confirmIICompletePicker) and, as a
-  // last line of defense, inside the Firestore transaction itself, so it's
-  // safe to let the row be clickable again while the user is still choosing.
-  _iiActionInFlight.delete(id);
-  release();
 }
 
 function closeIICompletePicker(){
@@ -31748,7 +31902,7 @@ function renderIICompletePickerBody(){
 
   const filtered = _iiAvailable.filter(s => !q || String(s.serial).toLowerCase().includes(q));
   if(!filtered.length){
-    list.innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">NO AVAILABLE SERIALS${item&&item.branch ? ' AT '+item.branch.toUpperCase() : ''}</div>`;
+    list.innerHTML = `<div style="padding:20px;text-align:center;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">NO AVAILABLE SERIALS${item&&item.branch ? ' AT '+item.branch.toUpperCase() : ''}<br><br>Add the serial to Inventory first, then come back and select it here.</div>`;
     return;
   }
 
@@ -31831,6 +31985,7 @@ async function finalizeIncompleteItemWithSerials(item, chosenSerials){
         const iiSnap = await tx.get(iiRef);
         if(!iiSnap.exists()) throw Object.assign(new Error('NOT_FOUND'), {code:'NOT_FOUND'});
         if(iiSnap.data().status === 'completed') throw Object.assign(new Error('ALREADY_COMPLETED'), {code:'ALREADY_COMPLETED'});
+        if(iiSnap.data().status === 'voided') throw Object.assign(new Error('SALE_VOIDED'), {code:'SALE_VOIDED'});
 
         const serialSnaps = [];
         for(const ref of serialRefs) serialSnaps.push(await tx.get(ref));
@@ -31867,6 +32022,18 @@ async function finalizeIncompleteItemWithSerials(item, chosenSerials){
 
       prod.stock = txResult.newCombined;
       prod.branches = txResult.updatedBranches;
+
+      // Verify the deduction really landed: re-read each chosen serial and
+      // confirm it is now 'sold' in Inventory. Then recompute the product's
+      // stock + per-branch counts from the live serials (the same method a
+      // normal sale uses), so the numbers always match the serial list.
+      for(const sel of chosenSerials){
+        const chk = await fb.getDoc(fb.doc(fb.db,'stocks',prod.id,'serials',sel.id));
+        if(!chk.exists() || chk.data().status !== 'sold'){
+          throw Object.assign(new Error('DEDUCT_NOT_VERIFIED'), {code:'DEDUCT_NOT_VERIFIED', serial: sel.serial});
+        }
+      }
+      await recomputeProductStockFromSerials(prod);
     } else if(prod && prod._serialsList){
       // Local/demo mode (no Firestore) — no transaction available, so at
       // least re-verify each serial is still unsold right before assigning it.
@@ -31879,10 +32046,14 @@ async function finalizeIncompleteItemWithSerials(item, chosenSerials){
         if(s){ s.status='sold'; s.soldTo=item.customer; s.soldAt=null; }
       });
       prod.stock = (prod._serialsList||[]).filter(x=>x.status==='in_stock').length + (parseInt(prod.pendingQty)||0);
+    } else {
+      // Nothing was deducted (product/serial data unavailable) — do NOT mark the
+      // item completed, otherwise it would look done while Inventory is untouched.
+      throw Object.assign(new Error('NO_INVENTORY_UPDATE'), {code:'NO_INVENTORY_UPDATE'});
     }
     await completeIncompleteItemRecord(item, chosenSerials);
     renderInventory();
-    showToast('Item completed — inventory deducted and serial number(s) assigned.');
+    showToast(`Item completed — ${chosenSerials.length} serial(s) marked SOLD and deducted from ${item.branch} stock.`, 5000);
   } catch(e){
     if(e && e.code === 'ALREADY_COMPLETED'){
       showToast('This item was already completed — nothing more to do here.');
@@ -31892,6 +32063,14 @@ async function finalizeIncompleteItemWithSerials(item, chosenSerials){
       showToast(`⚠ Serial ${e.serial||''} was just taken by another transaction — please pick a different one.`.replace('  ',' '));
       // Refresh the picker with the current in-stock list so the user can reselect.
       openCompleteIncompleteItem(item.id);
+    } else if(e && e.code === 'SALE_VOIDED'){
+      showToast('⚠ This sale was voided — the item can no longer be completed.', 6000);
+      item.status = 'voided';
+      renderIncompleteItemsTable(); refreshIncompleteItemsBadge();
+    } else if(e && (e.code === 'DEDUCT_NOT_VERIFIED' || e.code === 'NO_INVENTORY_UPDATE')){
+      console.error('Inventory deduction could not be confirmed for incomplete item:', e);
+      showToast('⚠ Inventory was NOT confirmed as updated' + (e.serial ? ' for serial ' + e.serial : '') + ' — please check Inventory before trying again.', 8000);
+      refreshIncompleteItemsBadge(); renderIncompleteItemsTable();
     } else if(e && e.code === 'DUPLICATE_SERIAL'){
       showToast('⚠ The same serial number was selected twice — please pick distinct serials.');
     } else {
@@ -31918,6 +32097,7 @@ async function finalizeIncompleteItemNoSerial(item){
         const iiSnap = await tx.get(iiRef);
         if(!iiSnap.exists()) throw Object.assign(new Error('NOT_FOUND'), {code:'NOT_FOUND'});
         if(iiSnap.data().status === 'completed') throw Object.assign(new Error('ALREADY_COMPLETED'), {code:'ALREADY_COMPLETED'});
+        if(iiSnap.data().status === 'voided') throw Object.assign(new Error('SALE_VOIDED'), {code:'SALE_VOIDED'});
 
         if(stockRef){
           const stockSnap = await tx.get(stockRef);
@@ -31950,6 +32130,12 @@ async function finalizeIncompleteItemNoSerial(item){
       item.status = 'completed';
       renderIncompleteItemsTable(); refreshIncompleteItemsBadge();
     } else {
+      if(e && e.code === 'SALE_VOIDED'){
+        showToast('⚠ This sale was voided — the item can no longer be completed.', 6000);
+        item.status = 'voided';
+        renderIncompleteItemsTable(); refreshIncompleteItemsBadge();
+        return;
+      }
       console.error('Failed to finalize incomplete item (no serial):', e);
       showToast('⚠ Failed to complete this item — please check Inventory and try again.');
     }
@@ -32043,7 +32229,7 @@ async function completeIncompleteItemRecord(item, serials){
       renderReceipt(tx, 'receipt-body');
       const panel = document.getElementById('receipt-incomplete-panel');
       if(panel){
-        const remaining = INCOMPLETE_ITEMS.filter(x => x.saleId === tx.id && x.status !== 'completed');
+        const remaining = INCOMPLETE_ITEMS.filter(x => x.saleId === tx.id && x.status !== 'completed' && x.status !== 'voided');
         if(remaining.length){
           panel.style.display = 'block';
           panel.innerHTML = buildIncompleteItemsPanelHTML(remaining);
@@ -32056,6 +32242,44 @@ async function completeIncompleteItemRecord(item, serials){
   }
 
   logActivity({ text: `✅ Incomplete item completed: ${item.prodName} (qty ${item.qty}) for sale ${item.slipNo||item.saleId} — inventory deducted.`, type:'inventory', green:true });
+  renderIncompleteItemsTable();
+  refreshIncompleteItemsBadge();
+}
+
+// ── Called when a sale is voided: flags every Incomplete Items record that ──
+// belongs to that sale as 'voided' (kept for the audit trail, but no longer
+// completable and no longer counted as pending). Best-effort: the void itself
+// has already succeeded by the time this runs.
+async function voidIncompleteItemsForSale(saleFirestoreId, tx, actor, reason){
+  const fb = window._fb;
+  const stamp = new Date().toISOString();
+  let touched = 0;
+  try {
+    if(fb && saleFirestoreId){
+      const snap = await fb.getDocs(fb.query(fb.collection(fb.db,'incompleteItems'), fb.where('saleFirestoreId','==', saleFirestoreId)));
+      for(const d of snap.docs){
+        const data = d.data();
+        if(data.status === 'voided') continue;
+        await fb.updateDoc(d.ref || fb.doc(fb.db,'incompleteItems', d.id), {
+          status: 'voided', statusBeforeVoid: data.status || 'pending',
+          voidedAt: fb.serverTimestamp(), voidedBy: actor || '', voidReason: reason || ''
+        });
+        touched++;
+      }
+    }
+  } catch(e){
+    console.error('Could not void Incomplete Items records for sale', saleFirestoreId, e);
+    showToast('⚠ Sale voided, but its Incomplete Items records could not be marked Voided — check Firestore rules for incompleteItems.', 8000);
+  }
+  // Keep the in-memory list in sync (also covers local/offline records).
+  INCOMPLETE_ITEMS.forEach(x=>{
+    if((saleFirestoreId && x.saleFirestoreId === saleFirestoreId) || (!x.saleFirestoreId && tx && x.saleId === tx.id)){
+      if(x.status !== 'voided'){
+        x.statusBeforeVoid = x.status || 'pending';
+        x.status = 'voided'; x.voidedAt = stamp; x.voidedBy = actor || ''; x.voidReason = reason || '';
+      }
+    }
+  });
   renderIncompleteItemsTable();
   refreshIncompleteItemsBadge();
 }
