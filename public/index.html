@@ -204,6 +204,10 @@ window.SALES_ACTIVE_CHUNK = [];
       customer: data.customerName || data.customer || 'Walk-In Customer',
       branch: data.branch || 'Central Store',
       soldBy: data.soldBy || data.staffName || data.salesperson || 'Staff',
+      soldByUid: data.soldByUid || '',
+      surveyBy: data.surveyBy || '',
+      surveyByUid: data.surveyByUid || '',
+      surveyCreditPct: parseFloat(data.surveyCreditPct) || 0,
       subtotal: parseFloat(data.subtotal) || 0,
       vat: parseFloat(data.vat) || 0,
       total: parseFloat(data.total) || parseFloat(data.grandTotal) || 0,
@@ -340,7 +344,7 @@ window.SALES_ACTIVE_CHUNK = [];
         <td style="font-family:var(--mono); color:var(--text-muted); font-size:0.75rem;">${tx.createdAt.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
         <td style="font-weight:500;${strike}">${tx.customer}</td>
         <td><span class="p-tag" style="margin:0;">${tx.branch}</span></td>
-        <td style="font-family:var(--mono); font-size:0.78rem; color:var(--text-muted);">${tx.soldBy}</td>
+        <td style="font-family:var(--mono); font-size:0.78rem; color:var(--text-muted);">${tx.soldBy}${tx.surveyBy ? `<div style="font-size:0.66rem;color:#0369a1;margin-top:2px;">🛠 Survey: ${tx.surveyBy} (${tx.surveyCreditPct||0}%)</div>` : ''}</td>
         <td style="font-family:var(--mono); text-align:right;${strike}">₱${formatCurrency(tx.subtotal)}</td>
         <td style="font-family:var(--mono); text-align:right; color:var(--text-muted);${strike}">₱${formatCurrency(tx.vat)}</td>
         <td style="font-family:var(--mono); text-align:right; font-weight:600; color:${isVoided ? 'var(--text-muted)' : 'var(--green)'};${strike}">₱${formatCurrency(tx.total)}</td>
@@ -5379,10 +5383,20 @@ body.app-running #screen-app   { display:flex !important; }
           </select>
         </div>
         <div class="field" style="margin:0;">
-          <label>Sold By</label>
+          <label>Sales By</label>
           <select id="sale-sold-by">
             <option value="">Loading…</option>
           </select>
+        </div>
+        <div class="field" style="margin:0;">
+          <label>Survey By <span style="font-weight:400;color:var(--text-muted);">(technical survey)</span></label>
+          <select id="sale-survey-by" onchange="onSaleSurveyByChange()">
+            <option value="">— None —</option>
+          </select>
+        </div>
+        <div class="field" id="sale-survey-pct-wrap" style="margin:0;display:none;">
+          <label>Survey Credit % <span style="font-weight:400;color:var(--text-muted);">(rest goes to Sales By)</span></label>
+          <input type="number" id="sale-survey-pct" value="50" min="1" max="99" step="1"/>
         </div>
       </div>
 
@@ -7326,6 +7340,27 @@ async function populateSaleSoldBySelect(){
   });
 
   sel.value = myUid; // default to self
+
+  // "Survey By": everyone on the roster (including me), default none.
+  const sv = document.getElementById('sale-survey-by');
+  if(sv){
+    sv.innerHTML = '<option value="">— None —</option>';
+    const all = [{ id: myUid, name: myName }].concat(others);
+    all.forEach(o => {
+      if(!o.id) return;
+      const opt = document.createElement('option');
+      opt.value = o.id; opt.textContent = o.name;
+      sv.appendChild(opt);
+    });
+    sv.value = '';
+    onSaleSurveyByChange();
+  }
+}
+
+function onSaleSurveyByChange(){
+  const has = !!document.getElementById('sale-survey-by')?.value;
+  const wrap = document.getElementById('sale-survey-pct-wrap');
+  if(wrap) wrap.style.display = has ? '' : 'none';
 }
 
 function openSalesModal(){
@@ -7879,6 +7914,16 @@ async function submitSale(){
   const soldByName = soldBySelect?.selectedOptions?.[0]?.textContent.replace(/ \(Myself\)$/, '').trim()
     || window._currentFirebaseUser?.displayName || document.getElementById('tb-user').textContent || 'Staff';
 
+  const surveySelect = document.getElementById('sale-survey-by');
+  const surveyByUid  = surveySelect?.value || '';
+  const surveyByName = surveyByUid ? (surveySelect.selectedOptions?.[0]?.textContent.replace(/ \(Myself\)$/, '').trim() || '') : '';
+  let surveyCreditPct = 0;
+  if(surveyByUid){
+    if(surveyByUid === soldByUid){ showToast('Survey By and Sales By are the same person — pick a different surveyor, or set Survey By to None.'); return; }
+    surveyCreditPct = parseFloat(document.getElementById('sale-survey-pct')?.value);
+    if(!(surveyCreditPct > 0 && surveyCreditPct < 100)){ showToast('Survey Credit % must be between 1 and 99.'); return; }
+  }
+
   const applyVatCheck = document.getElementById('sale-vat-toggle')?.checked !== false;
 
   if(!customer){ showToast('Please enter a customer name.'); return; }
@@ -7942,6 +7987,7 @@ async function submitSale(){
     time: now.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}),
     slipNo: 'SLP-' + String(saleSeq).padStart(7,'0'),
     soldBy: soldByName, soldByUid,
+    surveyBy: surveyByName, surveyByUid, surveyCreditPct,
     items: salesItems.map(it=>{
       if(it.isService){
         return { ...it, prodId:'', prodName: it.name || 'Service', model:'', unit: it.unit || 'LOT' };
@@ -8847,6 +8893,7 @@ function renderReceipt(tx, targetId){
         <div>
           <div style="margin-bottom:18px;">Prepared by:</div>
           <div style="border-top:1px solid #333;padding-top:3px;font-weight:600;">${tx.soldBy}</div>
+          ${tx.surveyBy ? `<div style="margin-top:6px;font-size:0.68rem;color:#444;">Technical survey by: <b>${tx.surveyBy}</b></div>` : ''}
         </div>
         <div>
           <div style="margin-bottom:18px;">Approved by:</div>
@@ -8962,6 +9009,9 @@ window.viewPastSaleReceipt = function(firestoreId){
   const balance = Math.max(0, roundMoney((tx.total || 0) - (tx.amountPaid || 0)));
   const payBtn = document.getElementById('view-receipt-payment-btn');
   if (payBtn) payBtn.style.display = (!tx.voided && balance > 0) ? '' : 'none';
+  // Survey credit changes who gets paid credit, so only Admin / Super Admin see this button.
+  const surveyBtn = document.getElementById('view-receipt-survey-btn');
+  if (surveyBtn) surveyBtn.style.display = (!tx.voided && (window._currentRole === 'admin' || window._currentRole === 'super')) ? '' : 'none';
 
   document.getElementById('modal-view-receipt').classList.add('active');
 
@@ -9237,6 +9287,105 @@ window.saveEditPaymentDates = async function(){
     if(msg) msg.textContent = '⚠ Could not save — ' + (e.message || e);
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = 'Save Dates'; }
+  }
+};
+
+// ── Edit "Survey By" (and its credit %) on an already-recorded sale ──
+// Admin / Super Admin only, because it changes who gets sales credit.
+window.onEditSurveyByChange = function(){
+  const has = !!document.getElementById('edit-survey-by')?.value;
+  const wrap = document.getElementById('edit-survey-pct-wrap');
+  if(wrap) wrap.style.display = has ? '' : 'none';
+};
+
+window.openEditSaleSurvey = async function(){
+  const role = window._currentRole;
+  if(role !== 'admin' && role !== 'super'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
+  const firestoreId = window._viewedSaleFirestoreId;
+  if(!firestoreId){ showToast('No transaction selected.'); return; }
+  const tx = SALES_ACTIVE_CHUNK.find(t => t.firestoreId === firestoreId);
+  if(!tx){ showToast('Could not locate that transaction.'); return; }
+  if(tx.voided){ showToast('This sale is voided — its survey credit can no longer be edited.'); return; }
+  const raw = tx.raw || {};
+
+  if(typeof ensureStaffRosterLoaded === 'function') await ensureStaffRosterLoaded();
+  const emps = (window.HR_ALL_EMPLOYEES || [])
+    .map(e => ({ id: e.id, name: e.fullName || e.displayName || (e.email ? e.email.split('@')[0] : e.id) }))
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  const sel = document.getElementById('edit-survey-by');
+  sel.innerHTML = '<option value="">— None —</option>';
+  const currentUid = raw.surveyByUid || tx.surveyByUid || '';
+  const soldByUid  = raw.soldByUid || tx.soldByUid || '';
+  emps.forEach(e => {
+    if(e.id === soldByUid) return; // Sales By can't also be the surveyor
+    const o = document.createElement('option');
+    o.value = e.id; o.textContent = e.name; sel.appendChild(o);
+  });
+  // Keep the saved surveyor visible even if no longer on the roster
+  if(currentUid && ![...sel.options].some(o => o.value === currentUid)){
+    const o = document.createElement('option');
+    o.value = currentUid; o.textContent = (raw.surveyBy || tx.surveyBy || 'Unknown') + ' (not on current staff list)';
+    sel.appendChild(o);
+  }
+  sel.value = currentUid;
+  document.getElementById('edit-survey-pct').value = (raw.surveyCreditPct || tx.surveyCreditPct || 50);
+  document.getElementById('edit-survey-sale-info').textContent = `Sale #${tx.txId} · Sales By: ${tx.soldBy}`;
+  document.getElementById('edit-survey-msg').textContent = '';
+  onEditSurveyByChange();
+  document.getElementById('modal-edit-survey').classList.add('active');
+};
+
+window.closeEditSaleSurvey = function(){
+  document.getElementById('modal-edit-survey').classList.remove('active');
+};
+
+window.saveEditSaleSurvey = async function(){
+  const role = window._currentRole;
+  if(role !== 'admin' && role !== 'super'){ showToast('Access restricted — Admin or Super Admin required.'); return; }
+  const firestoreId = window._viewedSaleFirestoreId;
+  const tx = SALES_ACTIVE_CHUNK.find(t => t.firestoreId === firestoreId);
+  if(!tx){ showToast('Could not locate that transaction.'); return; }
+  if(tx.voided){ showToast('This sale is voided.'); return; }
+  const fb = window._fb;
+  if(!fb){ showToast('Firebase not available.'); return; }
+
+  const sel = document.getElementById('edit-survey-by');
+  const msg = document.getElementById('edit-survey-msg');
+  const btn = document.getElementById('save-edit-survey-btn');
+  const surveyByUid = sel.value || '';
+  const surveyBy    = surveyByUid ? sel.selectedOptions[0].textContent.replace(/ \(not on current staff list\)$/, '').trim() : '';
+  let surveyCreditPct = 0;
+  if(surveyByUid){
+    if(surveyByUid === (tx.raw?.soldByUid || tx.soldByUid)){ msg.textContent = 'Survey By cannot be the same person as Sales By.'; return; }
+    surveyCreditPct = parseFloat(document.getElementById('edit-survey-pct').value);
+    if(!(surveyCreditPct > 0 && surveyCreditPct < 100)){ msg.textContent = 'Survey Credit % must be between 1 and 99.'; return; }
+  }
+
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email))
+    || document.getElementById('tb-user')?.textContent || 'Staff';
+
+  btn.disabled = true; btn.textContent = 'Saving…'; msg.textContent = '';
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'sales', firestoreId), {
+      surveyBy, surveyByUid, surveyCreditPct,
+      surveyUpdatedBy: actor, surveyUpdatedAt: fb.serverTimestamp(),
+      updatedAt: fb.serverTimestamp()
+    });
+    const apply = o => { if(o){ o.surveyBy = surveyBy; o.surveyByUid = surveyByUid; o.surveyCreditPct = surveyCreditPct; } };
+    apply(tx); apply(tx.raw);
+    apply((SALES_LOG || []).find(t => t.firestoreId === firestoreId));        // feeds Total Sales Per Staff
+    apply((_salesAllCache || []).find(t => t.firestoreId === firestoreId));
+    apply((window._salesPageChunk || []).find(t => t.firestoreId === firestoreId));
+    closeEditSaleSurvey();
+    renderSalesLogRecordsTable(SALES_ACTIVE_CHUNK);
+    viewPastSaleReceipt(firestoreId);
+    showToast(surveyByUid ? `Survey credit saved: ${surveyBy} (${surveyCreditPct}%).` : 'Survey By removed — full credit goes to Sales By.');
+  } catch(e){
+    console.error('Could not save survey edit:', e);
+    msg.textContent = '⚠ Could not save — ' + (e.message || e);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
   }
 };
 
@@ -9548,12 +9697,26 @@ function renderSalesPerStaffTable() {
 
   // Sales totals keyed by the account that made the sale (falls back to a
   // name-based key only for old records saved before soldByUid existed).
+  // When a sale has a technical-survey person, the credit is split: the
+  // surveyor gets surveyCreditPct% of the total, Sales By gets the rest.
   const salesByKey = {};
+  const addCredit = (key, amount, isSurvey) => {
+    if (!salesByKey[key]) salesByKey[key] = { total: 0, count: 0, survey: 0 };
+    salesByKey[key].total += amount;
+    salesByKey[key].count += 1;
+    if (isSurvey) salesByKey[key].survey += 1;
+  };
   sales.forEach(tx => {
     const key = tx.soldByUid || ('name:' + (tx.soldBy || 'Unknown'));
-    if (!salesByKey[key]) salesByKey[key] = { total: 0, count: 0 };
-    salesByKey[key].total += (tx.total || 0);
-    salesByKey[key].count += 1;
+    const total = tx.total || 0;
+    const pct = tx.surveyByUid ? Math.min(99, Math.max(0, parseFloat(tx.surveyCreditPct) || 0)) : 0;
+    if (pct > 0) {
+      const surveyShare = total * pct / 100;
+      addCredit(key, total - surveyShare, false);
+      addCredit(tx.surveyByUid, surveyShare, true);
+    } else {
+      addCredit(key, total, false);
+    }
   });
 
   // Full staff roster grouped by branch — every employee shows up, even with
@@ -9564,10 +9727,10 @@ function renderSalesPerStaffTable() {
   roster.forEach(emp => {
     const br = emp.branch || 'Unassigned Branch';
     const name = emp.fullName || emp.displayName || (emp.email ? emp.email.split('@')[0] : 'Unknown');
-    const stat = salesByKey[emp.id] || { total: 0, count: 0 };
+    const stat = salesByKey[emp.id] || { total: 0, count: 0, survey: 0 };
     consumedKeys.add(emp.id);
     if (!byBranch[br]) byBranch[br] = [];
-    byBranch[br].push({ name, total: stat.total, count: stat.count });
+    byBranch[br].push({ name, total: stat.total, count: stat.count, survey: stat.survey });
   });
 
   // Sales tied to an account not in the current staff roster (e.g. a removed
@@ -9582,7 +9745,7 @@ function renderSalesPerStaffTable() {
     const br = tx.branch || 'Unassigned Branch';
     const name = (tx.soldBy || 'Unknown') + ' (not on current staff list)';
     if (!byBranch[br]) byBranch[br] = [];
-    byBranch[br].push({ name, total: salesByKey[key].total, count: salesByKey[key].count });
+    byBranch[br].push({ name, total: salesByKey[key].total, count: salesByKey[key].count, survey: salesByKey[key].survey });
   });
 
   const branchNames = Object.keys(byBranch).sort();
@@ -9606,7 +9769,7 @@ function renderSalesPerStaffTable() {
       </tr>`;
     const staffRows = rows.map(r => `
       <tr>
-        <td style="padding:9px 12px 9px 22px;border-bottom:1px solid var(--border2);font-size:0.8rem;">${r.name}</td>
+        <td style="padding:9px 12px 9px 22px;border-bottom:1px solid var(--border2);font-size:0.8rem;">${r.name}${r.survey ? ` <span style="font-family:var(--mono);font-size:0.62rem;color:#0369a1;">· incl. ${r.survey} survey credit${r.survey>1?'s':''}</span>` : ''}</td>
         <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:center;font-family:var(--mono);font-size:0.76rem;color:var(--text-muted);">${r.count}</td>
         <td style="padding:9px 12px;border-bottom:1px solid var(--border2);text-align:right;font-family:var(--mono);font-size:0.82rem;color:var(--green);font-weight:600;">₱${fmt(r.total)}</td>
       </tr>`).join('');
@@ -20694,6 +20857,7 @@ function syncHRBranchSelects() {
     <!-- Footer -->
     <div style="background:var(--bg3);border-top:1px solid var(--border2);padding:10px 20px;display:flex;gap:8px;justify-content:flex-end;">
       <button class="qa-btn" id="view-receipt-payment-btn" onclick="addSalePayment()" style="padding:10px 18px;flex-shrink:0;color:#2e7d32;border-color:#2e7d32;display:none;">₱ Add Payment</button>
+      <button class="qa-btn" id="view-receipt-survey-btn" onclick="openEditSaleSurvey()" style="padding:10px 18px;flex-shrink:0;">🛠 Edit Survey By</button>
       <button class="qa-btn" id="view-receipt-dates-btn" onclick="openEditPaymentDates()" style="padding:10px 18px;flex-shrink:0;">📅 Edit Payment Dates</button>
       <button class="btn btn-ghost" onclick="closeViewReceiptModal()" style="width:120px;margin:0;">Close</button>
       <button class="btn btn-red" onclick="printReceipt('view-receipt-body')" style="width:160px;">Print Receipt</button>
@@ -20730,6 +20894,37 @@ function syncHRBranchSelects() {
     <div style="background:var(--bg3);border-top:1px solid var(--border2);padding:10px 20px;display:flex;gap:8px;justify-content:flex-end;">
       <button class="btn btn-ghost" onclick="closeEditPaymentDates()" style="width:120px;margin:0;">Cancel</button>
       <button class="btn btn-red" onclick="saveEditPaymentDates()" id="save-payment-dates-btn" style="width:160px;">Save Dates</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ EDIT SURVEY BY MODAL ══ -->
+<div class="modal-overlay" id="modal-edit-survey" onclick="if(event.target===this)closeEditSaleSurvey()" style="z-index:10001;">
+  <div class="modal-card" style="max-width:440px;width:95vw;padding:0;overflow:hidden;">
+    <div style="background:var(--bg3);border-bottom:1px solid var(--border2);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:4px;height:18px;background:var(--red);flex-shrink:0;"></div>
+        <span style="font-family:var(--mono);font-size:0.78rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--text);">EDIT SURVEY BY</span>
+      </div>
+      <button class="modal-close" onclick="closeEditSaleSurvey()">&#x2715;</button>
+    </div>
+    <div style="padding:20px;background:var(--card);">
+      <div id="edit-survey-sale-info" style="font-family:var(--mono);font-size:0.68rem;color:var(--text-muted);letter-spacing:0.06em;margin-bottom:16px;"></div>
+      <div class="field">
+        <label>Survey By <span style="font-weight:400;color:var(--text-muted);">(technical survey)</span></label>
+        <select id="edit-survey-by" onchange="onEditSurveyByChange()" style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:10px 12px;color:var(--text);font-size:0.88rem;outline:none;box-sizing:border-box;">
+          <option value="">— None —</option>
+        </select>
+      </div>
+      <div class="field" id="edit-survey-pct-wrap" style="display:none;">
+        <label>Survey Credit % <span style="font-weight:400;color:var(--text-muted);">(rest goes to Sales By)</span></label>
+        <input type="number" id="edit-survey-pct" value="50" min="1" max="99" step="1" style="width:100%;background:var(--bg3);border:1px solid var(--border2);padding:10px 12px;color:var(--text);font-size:0.88rem;outline:none;box-sizing:border-box;"/>
+      </div>
+      <div id="edit-survey-msg" style="font-family:var(--mono);font-size:0.7rem;color:var(--red);min-height:18px;margin-top:4px;"></div>
+    </div>
+    <div style="background:var(--bg3);border-top:1px solid var(--border2);padding:10px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeEditSaleSurvey()" style="width:120px;margin:0;">Cancel</button>
+      <button class="btn btn-red" onclick="saveEditSaleSurvey()" id="save-edit-survey-btn" style="width:160px;">Save</button>
     </div>
   </div>
 </div>
@@ -23698,6 +23893,10 @@ window.openLeadLinkedTx = async function(type, firestoreId) {
         customer: data.customerName || data.customer || 'Walk-In Customer',
         branch: data.branch || 'Central Store',
         soldBy: data.soldBy || data.staffName || data.salesperson || 'Staff',
+        soldByUid: data.soldByUid || '',
+        surveyBy: data.surveyBy || '',
+        surveyByUid: data.surveyByUid || '',
+        surveyCreditPct: parseFloat(data.surveyCreditPct) || 0,
         subtotal: parseFloat(data.subtotal) || 0,
         vat: parseFloat(data.vat) || 0,
         total: parseFloat(data.total) || parseFloat(data.grandTotal) || 0,
