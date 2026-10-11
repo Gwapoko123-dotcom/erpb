@@ -2284,6 +2284,9 @@ body.app-running #screen-app   { display:flex !important; }
         <div class="nav-item" onclick="showPage('installation',this)">
           Installation List
         </div>
+        <div class="nav-item" id="nav-servicecall" onclick="showPage('servicecall',this)">
+          Service Call
+        </div>
         <div class="nav-section">Finance</div>
         <div class="nav-item" onclick="showPage('expenses',this)">
           Expenses
@@ -4537,6 +4540,179 @@ body.app-running #screen-app   { display:flex !important; }
     <div id="admin-ca-empty" style="display:none;text-align:center;padding:32px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.1em;border:1px solid var(--border2);border-top:none;background:var(--card);">◇<br><br>NO CASH ADVANCE REQUESTS</div>
   </div>
 </div>
+      <!-- ══════════════ SERVICE CALL PAGE ══════════════ -->
+      <div id="page-servicecall" class="page">
+        <div class="page-heading">SERVICE CALL</div>
+
+        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px;">
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">TOTAL SERVICE CALLS</div>
+            <div id="sc-stat-total" style="font-size:1.5rem; font-weight:700; font-family:var(--mono);">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">AWAITING CONFIRMATION</div>
+            <div id="sc-stat-pending" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:#f59e0b;">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">CONFIRMED</div>
+            <div id="sc-stat-confirmed" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:var(--green);">0</div>
+          </div>
+          <div class="panel" style="padding:16px; margin:0;">
+            <div style="font-family:var(--mono); font-size:0.6rem; letter-spacing:.12em; color:var(--text-muted); margin-bottom:6px;">IN WARRANTY</div>
+            <div id="sc-stat-warranty" style="font-size:1.5rem; font-weight:700; font-family:var(--mono); color:#1565c0;">0</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <span>Service Report Forms</span>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <input type="text" id="sc-search-input" placeholder="Search customer, JO no., serial…" oninput="renderServiceCallTable()"
+                style="background:var(--bg3); border:1px solid var(--border2); padding:6px 12px; color:var(--text); font-size:0.78rem; outline:none; width:260px;"/>
+              <button id="sc-void-requests-btn" class="qa-btn" onclick="scOpenVoidRequests()" style="display:none; padding:7px 14px; font-size:0.74rem; white-space:nowrap; color:#9333ea; border-color:#9333ea;">⊘ Void Requests <span id="sc-void-req-badge" style="display:none; background:#9333ea; color:#fff; border-radius:10px; padding:1px 7px; font-size:0.66rem; margin-left:4px;">0</span></button>
+              <button class="btn btn-red" onclick="openServiceCallModal()" style="padding:7px 18px; font-size:0.78rem; white-space:nowrap;">+ New Service Call</button>
+            </div>
+          </div>
+          <div class="t-wrap">
+            <table class="htable">
+              <thead>
+                <tr>
+                  <th>SC #</th>
+                  <th>Date of Service</th>
+                  <th>Customer</th>
+                  <th>Service JO No.</th>
+                  <th>Handled By</th>
+                  <th>Warranty</th>
+                  <th style="text-align:center;">Devices</th>
+                  <th>Confirmed</th>
+                  <th style="text-align:center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="sc-log-tbody"></tbody>
+            </table>
+          </div>
+          <div id="sc-log-empty" style="display:none; text-align:center; padding:32px; font-family:var(--mono); font-size:0.75rem; color:var(--text-muted);">◇ NO SERVICE CALLS FOUND</div>
+          <div id="sc-page-indicator" style="padding:12px 0 0; font-family:var(--mono); font-size:0.68rem; color:var(--text-muted);"></div>
+        </div>
+      </div>
+
+      <!-- ══ SERVICE CALL FORM MODAL ══ -->
+      <div id="modal-sc-form" class="modal-overlay" onclick="if(event.target===this)closeServiceCallModal()">
+        <div class="modal-card modal-xl" style="max-width:820px; max-height:92vh; overflow-y:auto;">
+          <div class="modal-title">
+            <span id="sc-modal-title">New Service Call</span>
+            <button class="modal-close" onclick="closeServiceCallModal()">✕</button>
+          </div>
+
+          <div id="sc-readonly-banner" style="display:none; background:#e8f5e9; border:1px solid #81c784; color:#1b5e20; padding:8px 12px; margin-bottom:12px; font-size:0.8rem;"></div>
+          <div style="background:#b8cce4; color:#111; text-align:center; font-weight:800; letter-spacing:.06em; padding:8px; margin-bottom:12px; font-size:0.95rem;">SERVICE REPORT FORM</div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div class="field" style="grid-column:1/-1;"><label>Customer / Company *</label><input type="text" id="sc-customer" placeholder="e.g. ABC Corporation" list="sc-customer-list" autocomplete="off"/></div>
+            <div class="field" style="grid-column:1/-1;"><label>Site Address *</label><input type="text" id="sc-address" placeholder="Full address of the service site"/></div>
+            <div class="field"><label>Contact Person</label><input type="text" id="sc-contact-person"/></div>
+            <div class="field"><label>Date of Service *</label><input type="date" id="sc-service-date"/></div>
+            <div class="field"><label>Contact Number</label><input type="text" id="sc-contact-number" placeholder="09XX-XXX-XXXX"/></div>
+            <div class="field"><label>Service JO No.</label><input type="text" id="sc-jo-no"/></div>
+            <div class="field"><label>Handled By</label><input type="text" id="sc-handled-by" list="sc-staff-list" autocomplete="off"/></div>
+            <div class="field">
+              <label>Warranty</label>
+              <select id="sc-warranty">
+                <option value="">— Select —</option>
+                <option value="in_warranty">In Warranty</option>
+                <option value="out_of_warranty">Out of Warranty</option>
+                <option value="warranty_void">Warranty Void</option>
+                <option value="na">Not Applicable</option>
+              </select>
+            </div>
+          </div>
+          <datalist id="sc-staff-list"></datalist>
+          <datalist id="sc-customer-list"></datalist>
+          <datalist id="sc-device-list"></datalist>
+          <datalist id="sc-serial-list"></datalist>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; margin:6px 0 8px;">
+            <div style="font-family:var(--mono); font-size:0.72rem; letter-spacing:.1em; color:var(--text);">DEFECTIVE DEVICE INFORMATION</div>
+            <button type="button" class="qa-btn" onclick="scAddDeviceRow()" style="padding:5px 12px; font-size:0.72rem;">+ Add Device</button>
+          </div>
+          <div class="t-wrap" style="margin-bottom:14px;">
+            <table class="htable">
+              <thead>
+                <tr><th>Device</th><th>Brand</th><th>Model</th><th>Serial No.</th><th>Defect / Problem</th><th style="width:36px;"></th></tr>
+              </thead>
+              <tbody id="sc-devices-tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="field" style="margin-bottom:14px;">
+            <label>Remarks</label>
+            <textarea id="sc-remarks" rows="3" style="width:100%; box-sizing:border-box; background:var(--bg3); border:1px solid var(--border2); padding:10px 12px; color:var(--text); font-size:0.86rem; outline:none; resize:vertical;"></textarea>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div class="field"><label>Service By</label><input type="text" id="sc-service-by" list="sc-staff-list" autocomplete="off"/></div>
+            <div class="field"><label>Date (Service By)</label><input type="date" id="sc-service-by-date"/></div>
+          </div>
+
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="closeServiceCallModal()" style="width:120px; margin:0;">Cancel</button>
+            <button class="btn btn-red" id="sc-save-btn" onclick="saveServiceCall()" style="width:170px;">Save Service Call</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Confirm service call (marks it finished + locks it) -->
+      <div id="modal-sc-confirm" class="modal-overlay" onclick="if(event.target===this)scCloseConfirm()">
+        <div class="modal-card" style="max-width:460px;">
+          <div class="modal-title">
+            <span>Confirm Service Call</span>
+            <button class="modal-close" onclick="scCloseConfirm()">✕</button>
+          </div>
+          <div id="sc-confirm-summary" style="font-size:0.82rem; margin-bottom:12px; color:var(--text);"></div>
+          <div class="field" style="margin-bottom:10px;"><label>Confirmed By <span style="font-weight:400;color:var(--text-muted);">(customer representative) *</span></label><input type="text" id="sc-confirm-by" autocomplete="off"/></div>
+          <div class="field" style="margin-bottom:12px;"><label>Date Confirmed *</label><input type="date" id="sc-confirm-date"/></div>
+          <div style="background:#fff8e1; border:1px solid #ffd54f; color:#6d4c00; padding:8px 12px; font-size:0.76rem; margin-bottom:14px;">
+            Confirming marks this service call as <b>finished</b>. It can no longer be edited afterwards — only a Super Admin can reopen it.
+          </div>
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn btn-ghost" onclick="scCloseConfirm()" style="width:110px; margin:0;">Cancel</button>
+            <button class="btn btn-red" id="sc-confirm-btn" onclick="scSubmitConfirm()" style="width:170px;">Confirm &amp; Finish</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Service call void requests (Super Admin review) -->
+      <div id="modal-sc-void-requests" class="modal-overlay" onclick="if(event.target===this)scCloseVoidRequests()">
+        <div class="modal-card" style="max-width:860px; width:96vw; padding:0; overflow:hidden; max-height:85vh; display:flex; flex-direction:column;">
+          <div style="background:var(--bg3); border-bottom:1px solid var(--border2); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:4px; height:18px; background:#9333ea; flex-shrink:0;"></div>
+              <span style="font-family:var(--mono); font-size:0.78rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--text);">SERVICE CALL VOID REQUESTS — PENDING APPROVAL</span>
+            </div>
+            <button class="modal-close" onclick="scCloseVoidRequests()">&#x2715;</button>
+          </div>
+          <div style="padding:8px 20px; font-size:0.72rem; color:var(--text-muted); font-family:var(--mono); border-bottom:1px solid var(--border2); flex-shrink:0;">
+            A voided service call is cancelled for good and can no longer be changed. Only a Super Admin can approve these requests.
+          </div>
+          <div style="overflow-y:auto; flex:1;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="background:var(--bg3); position:sticky; top:0;">
+                  <th style="padding:9px 14px; text-align:left; font-size:0.68rem;">SC #</th>
+                  <th style="padding:9px 14px; text-align:left; font-size:0.68rem;">Customer</th>
+                  <th style="padding:9px 14px; text-align:left; font-size:0.68rem;">Reason</th>
+                  <th style="padding:9px 14px; text-align:left; font-size:0.68rem;">Requested By</th>
+                  <th style="padding:9px 14px; text-align:left; font-size:0.68rem;">Date</th>
+                  <th style="padding:9px 14px; text-align:center; font-size:0.68rem;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="sc-void-req-tbody"></tbody>
+            </table>
+            <div id="sc-void-req-empty" style="display:none; text-align:center; padding:28px; font-family:var(--mono); font-size:0.72rem; color:var(--text-muted);">NO PENDING VOID REQUESTS</div>
+          </div>
+        </div>
+      </div>
+
       <div id="page-leave" class="page">
         <div class="page-heading">REQUEST FOR <span>LEAVE</span></div>
 
@@ -6630,7 +6806,7 @@ function initApp(){
   // (user/admin/super) in read-only mode — see renderProductTable(), which hides the
   // Add/Edit/Delete controls and shows "View only" for anyone below Admin.
   // Human Resource is likewise viewable by everyone; only Super Admin can edit within it.
-  ['nav-branches', 'nav-stocktransfer'].forEach(id => {
+  ['nav-branches', 'nav-stocktransfer', 'nav-servicecall'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.classList.toggle('locked', currentRole === 'user');
   });
@@ -13132,7 +13308,7 @@ const PAGE_TITLES = {
   hr:'HUMAN RESOURCE', branches:'BRANCHES', inventory:'INVENTORY',
   rma:'RMA ITEMS', stocktransfer:'STOCK TRANSFER',
   sales:'SALES', quotation:'QUOTATION', leads:'LEADS',
-  installation:'INSTALLATION LIST', expenses:'EXPENSES',
+  installation:'INSTALLATION LIST', servicecall:'SERVICE CALL', expenses:'EXPENSES',
   leave:'REQUEST FOR LEAVE', overtime:'REQUEST FOR OVERTIME',
   holiday:'WORK ON HOLIDAY', ob:'OFFICIAL BUSINESS',
   purchaseorders:'PURCHASE ORDERS', reimbursements:'REIMBURSEMENTS',
@@ -13148,6 +13324,10 @@ function showPage(name, el){
   // a stale/cached nav element, a direct showPage('stocktransfer') call, a
   // deep link, etc. — so a plain 'user' role can never load transfer data
   // or reach the "+ New Transfer" button regardless of entry point.
+  if(name === 'servicecall' && !['admin','super'].includes(window._currentRole)){
+    showToast('Access restricted — Admin or Super Admin required.');
+    return;
+  }
   if(name === 'stocktransfer' && window._currentRole === 'user'){
     showToast('Access restricted — Admin or Super Admin required.');
     return;
@@ -13170,6 +13350,7 @@ function showPage(name, el){
   if(name === 'quotation'){ loadQuotationsPage(); }
   if(name === 'leads'){ loadLeadsPage('init'); refreshLeadRequestBadge(); }
   if(name === 'installation'){ loadInstallationPage(); }
+  if(name === 'servicecall'){ if(typeof loadServiceCallPage === 'function') loadServiceCallPage(); }
   if(name === 'branches'){ loadBranches(); }
   if(name === 'payroll'){ initPayrollPage(); }
   if(name === 'leave'){ if(typeof loadLeavePage === 'function') loadLeavePage(); }
@@ -32495,6 +32676,899 @@ async function voidIncompleteItemsForSale(saleFirestoreId, tx, actor, reason){
 // ═══════════════════════════════════════════════════════════════
 //  END INCOMPLETE ITEMS MODULE
 // ═══════════════════════════════════════════════════════════════
+</script>
+<script>
+// ══════════════════════════════════════════════════════════
+//  SERVICE CALL MODULE  (Firestore collection: serviceCalls)
+// ══════════════════════════════════════════════════════════
+let SC_CHUNK = [];
+let _scEditId = null;
+
+const SC_WARRANTY_LABELS = {
+  in_warranty: 'In Warranty', out_of_warranty: 'Out of Warranty',
+  warranty_void: 'Warranty Void', na: 'Not Applicable'
+};
+function scCanAccess(){ return ['admin','super'].includes(window._currentRole); }
+function scDeny(){ showToast('Access restricted — Admin or Super Admin required.'); }
+function scEsc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function scFmtDate(v){
+  if(!v) return '—';
+  const d = new Date(v + 'T00:00:00');
+  return isNaN(d) ? scEsc(v) : d.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' });
+}
+
+window.loadServiceCallPage = async function(){
+  if(!scCanAccess()){ scDeny(); return; }
+  const tbody = document.getElementById('sc-log-tbody');
+  if(tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;font-family:var(--mono);color:var(--text-muted);">LOADING SERVICE CALLS…</td></tr>';
+  try {
+    const fb = window._fb;
+    if(!fb) throw new Error('Firebase not ready');
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'serviceCalls'), fb.orderBy('createdAt', 'desc'), fb.limit(200)));
+    SC_CHUNK = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderServiceCallTable();
+    scRefreshVoidBadge();
+  } catch(err){
+    console.error('Service call load error:', err);
+    if(tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--red);font-family:var(--mono);">FAILED TO LOAD — ${scEsc(err.message || err)}</td></tr>`;
+  }
+};
+
+window.renderServiceCallTable = function(){
+  const tbody = document.getElementById('sc-log-tbody');
+  const empty = document.getElementById('sc-log-empty');
+  if(!tbody) return;
+  const q = (document.getElementById('sc-search-input')?.value || '').trim().toLowerCase();
+  const rows = SC_CHUNK.filter(r => {
+    if(!q) return true;
+    const hay = [r.scId, r.customer, r.serviceJoNo, r.handledBy, r.siteAddress, r.contactPerson,
+                 ...(r.devices || []).map(d => [d.device, d.brand, d.model, d.serial].join(' '))].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+  const active = SC_CHUNK.filter(r => !scIsVoided(r));          // voided calls don't count toward the totals
+  set('sc-stat-total', active.length);
+  set('sc-stat-confirmed', active.filter(r => scIsConfirmed(r)).length);
+  set('sc-stat-pending', active.filter(r => !scIsConfirmed(r)).length);
+  set('sc-stat-warranty', active.filter(r => r.warranty === 'in_warranty').length);
+  set('sc-page-indicator', `DISPLAYING ${rows.length} OF ${SC_CHUNK.length} SERVICE CALL RECORD(S)` + (SC_CHUNK.length >= 200 ? ' — SHOWING THE LATEST 200' : ''));
+
+  if(!rows.length){ tbody.innerHTML = ''; if(empty) empty.style.display = 'block'; return; }
+  if(empty) empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(r => {
+    const confirmed = scIsConfirmed(r), voided = scIsVoided(r), vpending = scVoidPending(r);
+    const locked = confirmed || voided || vpending;
+    const sub = (t) => `<div style="font-size:0.64rem;color:var(--text-muted);margin-top:2px;">${t}</div>`;
+    const badge = voided
+      ? `<span class="po-status" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a;">VOIDED</span>${sub(scTsDate(r.voidedAt))}`
+      : vpending
+        ? '<span class="po-status pending" style="background:#f3e5f5;color:#7b1fa2;border:1px solid #ce93d8;">Void Pending</span>'
+        : confirmed
+          ? `<span class="po-status approved">${scEsc(r.confirmedBy)}</span>${sub(scFmtDate(r.confirmedByDate))}`
+          : '<span class="po-status pending">Awaiting</span>';
+    const isSuper = window._currentRole === 'super';
+    const B = (label, fn, extra) => `<button class="qa-btn" style="padding:4px 10px;font-size:0.7rem;${extra || ''}" onclick="${fn}('${r.id}')">${label}</button>`;
+    const actions = [
+      B(locked ? 'View' : 'Edit', 'openServiceCallModal'),
+      (!locked) ? B('Confirm', 'scOpenConfirm', 'color:#2e7d32;border-color:#2e7d32;') : '',
+      B('Print', 'printServiceCall'),
+      (!voided && !vpending) ? B('Void', 'scVoid', 'color:#e65100;border-color:#e65100;') : '',
+      (isSuper && confirmed && !voided) ? B('Reopen', 'scReopen', 'color:#c62828;') : '',
+      isSuper ? B('Delete', 'scDelete', 'color:#fff;background:#c62828;border-color:#c62828;') : ''
+    ].filter(Boolean).join(' ');
+    return `<tr${voided ? ' style="opacity:0.55;"' : ''}>
+      <td style="font-family:var(--mono);font-size:0.78rem;">${scEsc(r.scId || r.id.slice(0,8).toUpperCase())}</td>
+      <td style="font-size:0.8rem;">${scFmtDate(r.serviceDate)}</td>
+      <td style="font-size:0.82rem;font-weight:600;">${scEsc(r.customer)}</td>
+      <td style="font-family:var(--mono);font-size:0.78rem;">${scEsc(r.serviceJoNo) || '—'}</td>
+      <td style="font-size:0.8rem;">${scEsc(r.handledBy) || '—'}</td>
+      <td style="font-size:0.78rem;">${scEsc(SC_WARRANTY_LABELS[r.warranty] || '—')}</td>
+      <td style="text-align:center;font-family:var(--mono);">${(r.devices || []).length}</td>
+      <td>${badge}</td>
+      <td style="text-align:center;white-space:nowrap;">
+        ${actions}
+      </td>
+    </tr>`;
+  }).join('');
+};
+
+// ── Staff suggestions for Handled By / Service By ──
+// ── Customer picker: existing customers from Leads + Sales + Quotations ──
+let SC_CUSTOMERS = new Map();   // lower-case name -> {name,address,contactPerson,contactNumber,sources[]}
+let _scCustLoadedAt = 0, _scCustPromise = null;
+
+function scAddCustomer(map, src, name, info){
+  name = String(name == null ? '' : name).trim();
+  if(!name) return;
+  const key = name.toLowerCase();
+  let c = map.get(key);
+  if(!c){ c = { name, address:'', contactPerson:'', contactNumber:'', sources:[] }; map.set(key, c); }
+  if(!c.sources.includes(src)) c.sources.push(src);
+  ['address','contactPerson','contactNumber'].forEach(k => {
+    const v = String(info[k] == null ? '' : info[k]).trim();
+    if(v && !c[k]) c[k] = v;          // first (most recent / most trusted) value wins
+  });
+}
+
+async function scLoadCustomers(force){
+  if(!force && SC_CUSTOMERS.size && (Date.now() - _scCustLoadedAt) < 5*60*1000) return;
+  if(_scCustPromise) return _scCustPromise;
+  const fb = window._fb;
+  if(!fb) return;
+  _scCustPromise = (async () => {
+    const isPriv = (typeof currentRole !== 'undefined') && ['admin','super'].includes(currentRole);
+    const uid = window._currentFirebaseUser?.uid || '';
+    const newest = (a, b) => ((b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    // Each source is loaded on its own so one failing (e.g. permissions) never blocks the others.
+    const grab = async (label, q) => {
+      try { return (await fb.getDocs(q)).docs.map(d => d.data()).sort(newest); }
+      catch(e){ console.warn('Customer list: could not load ' + label + ':', e.message || e); return []; }
+    };
+    const [sales, quotes, leads] = await Promise.all([
+      grab('sales',      fb.collection(fb.db, 'sales')),
+      grab('quotations', fb.collection(fb.db, 'quotations')),
+      // Rules only let non-admins read leads assigned to them
+      grab('leads',      isPriv ? fb.collection(fb.db, 'leads')
+                                : fb.query(fb.collection(fb.db, 'leads'), fb.where('assigneeUid', '==', uid)))
+    ]);
+    const map = new Map();
+    sales.forEach(r  => scAddCustomer(map, 'Sale',      r.customer, { address:r.address, contactPerson:r.contactPerson, contactNumber:r.contact }));
+    quotes.forEach(r => scAddCustomer(map, 'Quotation', r.client,   { address:r.clientAddress, contactPerson:r.contact, contactNumber:r.clientPhone }));
+    leads.forEach(r  => scAddCustomer(map, 'Lead',      r.company,  { address:r.address || r.siteAddress, contactPerson:r.contact, contactNumber:r.phone }));
+    SC_CUSTOMERS = map;
+    _scCustLoadedAt = Date.now();
+  })().finally(() => { _scCustPromise = null; });
+  return _scCustPromise;
+}
+
+function scRenderCustomerList(){
+  const dl = document.getElementById('sc-customer-list');
+  if(!dl) return;
+  const list = [...SC_CUSTOMERS.values()].sort((a,b) => a.name.localeCompare(b.name));
+  dl.innerHTML = list.map(c => `<option value="${scEsc(c.name)}" label="${scEsc(c.sources.join(' · '))}"></option>`).join('');
+}
+
+function scApplyCustomerPick(){
+  if(_scEditId) return;                                   // never overwrite when editing a saved record
+  const el = document.getElementById('sc-customer');
+  const c = el && SC_CUSTOMERS.get(el.value.trim().toLowerCase());
+  if(!c) return;
+  const fill = (id, val) => { const e = document.getElementById(id); if(e && val && !e.value.trim()) e.value = val; };
+  fill('sc-address', c.address);
+  fill('sc-contact-person', c.contactPerson);
+  fill('sc-contact-number', c.contactNumber);
+}
+
+(function scWireCustomerPicker(){
+  const el = document.getElementById('sc-customer');
+  if(!el) return;
+  const refresh = () => scLoadCustomers().then(scRenderCustomerList);
+  el.addEventListener('focus', refresh);
+  el.addEventListener('click', refresh);
+  el.addEventListener('input',  scApplyCustomerPick);     // fires when a suggestion is picked
+  el.addEventListener('change', scApplyCustomerPick);
+})();
+
+async function scFillStaffList(){
+  try { if(typeof ensureStaffRosterLoaded === 'function') await ensureStaffRosterLoaded(); } catch(e){}
+  const dl = document.getElementById('sc-staff-list');
+  if(!dl) return;
+  const names = (window.HR_ALL_EMPLOYEES || [])
+    .map(e => e.fullName || e.displayName || (e.email ? e.email.split('@')[0] : ''))
+    .filter(Boolean).sort((a,b) => a.localeCompare(b));
+  dl.innerHTML = [...new Set(names)].map(n => `<option value="${scEsc(n)}"></option>`).join('');
+}
+
+// ── Device picker: inventory items + their serials (sold ones included) ──
+let SC_SERIALS = [];            // [{serial,status,soldTo,soldAt,branch,prodId,prodName,model}]
+let _scSerialsLoadedAt = 0, _scSerialsPromise = null;
+
+function scInventory(){
+  try { return (typeof PRICELIST !== 'undefined' && Array.isArray(PRICELIST)) ? PRICELIST : []; } catch(e){ return []; }
+}
+async function scEnsureInventory(){
+  try {
+    if(!scInventory().length && typeof stocksLoaded !== 'undefined' && !stocksLoaded && typeof loadStocksFromFirestore === 'function'){
+      await loadStocksFromFirestore();
+    }
+  } catch(e){}
+}
+// Inventory "name" is the Brand Name; category = the kind of device.
+function scItemLabel(p){ return p.model ? `${p.name} — ${p.model}` : String(p.name); }
+function scFindProduct(name, model){
+  const n = String(name || '').trim().toLowerCase();
+  if(!n) return null;
+  const hits = scInventory().filter(p => String(p.name || '').trim().toLowerCase() === n);
+  if(!hits.length) return null;
+  const m = String(model || '').trim().toLowerCase();
+  return (m && hits.find(p => String(p.model || '').trim().toLowerCase() === m)) || (m ? null : hits[0]);
+}
+function scRowProduct(tr){
+  return scFindProduct(tr.querySelector('.sc-dev-brand').value, tr.querySelector('.sc-dev-model').value);
+}
+function scStatusText(r){
+  const st = String(r.status || 'in_stock').toLowerCase();
+  if(st === 'sold') return 'SOLD' + (r.soldTo ? ' to ' + r.soldTo : '');
+  if(st === 'in_stock') return 'In stock';
+  return st.replace(/_/g, ' ');
+}
+function scTsDate(t){
+  try { const d = t && t.toDate ? t.toDate() : (t ? new Date(t) : null); return d && !isNaN(d) ? d.toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'}) : ''; } catch(e){ return ''; }
+}
+
+async function scLoadSerials(force){
+  if(!force && SC_SERIALS.length && (Date.now() - _scSerialsLoadedAt) < 5*60*1000) return;
+  if(_scSerialsPromise) return _scSerialsPromise;
+  const fb = window._fb;
+  if(!fb) return;
+  _scSerialsPromise = (async () => {
+    await scEnsureInventory();
+    const inv = scInventory();
+    const byId = new Map(inv.map(p => [p.id, p]));
+    const out = [];
+    const push = (prodId, data) => {
+      if(!data || !data.serial) return;
+      const p = byId.get(prodId);
+      out.push({ serial:String(data.serial), status:data.status || 'in_stock', soldTo:data.soldTo || '', soldAt:data.soldAt || null,
+                 branch:data.branch || '', prodId, prodName:p ? p.name : '', model:p ? (p.model || '') : '', category:p ? (p.category || '') : '' });
+    };
+    let ok = false;
+    try {                                   // one query for every product's serials
+      const snap = await fb.getDocs(fb.collectionGroup(fb.db, 'serials'));
+      snap.forEach(d => push(d.ref.parent.parent ? d.ref.parent.parent.id : null, d.data()));
+      ok = true;
+    } catch(e){ console.warn('Serial list: collection-group query unavailable, falling back per product:', e.code || e.message || e); }
+    if(!ok){
+      await Promise.all(inv.filter(p => p.hasSerials && !String(p.id).startsWith('local')).map(async p => {
+        try { (await fb.getDocs(fb.collection(fb.db, 'stocks', p.id, 'serials'))).forEach(d => push(p.id, d.data())); }
+        catch(e){ console.warn('Serial list: could not read serials for', p.id, e.message || e); }
+      }));
+    }
+    SC_SERIALS = out.sort((a,b) => a.serial.localeCompare(b.serial, undefined, {numeric:true}));
+    _scSerialsLoadedAt = Date.now();
+  })().finally(() => { _scSerialsPromise = null; });
+  return _scSerialsPromise;
+}
+
+async function scRenderDeviceList(){
+  await scEnsureInventory();
+  const dl = document.getElementById('sc-device-list');
+  if(!dl) return;
+  const items = scInventory().slice().sort((a,b) => scItemLabel(a).localeCompare(scItemLabel(b)));
+  dl.innerHTML = items.map(p => {
+    const info = [p.category, 'stock ' + p.stock].filter(Boolean).join(' · ');
+    return `<option value="${scEsc(scItemLabel(p))}" label="${scEsc(info)}"></option>`;
+  }).join('');
+}
+
+function scRenderSerialList(tr){
+  const dl = document.getElementById('sc-serial-list');
+  if(!dl || !tr) return;
+  const typed = (tr.querySelector('.sc-dev-serial').value || '').trim().toLowerCase();
+  const prod = scRowProduct(tr);
+  let list = prod ? SC_SERIALS.filter(r => r.prodId === prod.id) : SC_SERIALS;
+  if(typed) list = list.filter(r => r.serial.toLowerCase().includes(typed));
+  list = list.slice(0, prod ? 200 : 60);
+  dl.innerHTML = list.map(r => {
+    const label = [prod ? '' : r.prodName, scStatusText(r)].filter(Boolean).join(' · ');
+    return `<option value="${scEsc(r.serial)}" label="${scEsc(label)}"></option>`;
+  }).join('');
+}
+
+function scShowSerialHint(tr, rec){
+  const h = tr.querySelector('.sc-serial-hint');
+  if(!h) return;
+  if(!rec){ h.textContent = ''; return; }
+  const sold = String(rec.status).toLowerCase() === 'sold';
+  const bits = [scStatusText(rec), sold ? scTsDate(rec.soldAt) : '', rec.branch].filter(Boolean);
+  h.textContent = bits.join(' · ');
+  h.style.color = sold ? 'var(--orange, #f59e0b)' : 'var(--green, #16a34a)';
+}
+
+function scFillFromItem(tr, p){
+  const set = (cls, v) => { tr.querySelector(cls).value = v || ''; };
+  if(p.category && p.category !== 'Uncategorized') set('.sc-dev-device', p.category);   // Device  = category
+  set('.sc-dev-brand', p.name);                                                         // Brand   = inventory brand name
+  set('.sc-dev-model', p.model);                                                        // Model   = inventory model
+  scShowSerialHint(tr, null);                    // serial stays blank for the admin to fill in
+  scRenderSerialList(tr);
+}
+function scOnItemInput(tr, t){
+  const v = t.value.trim().toLowerCase();
+  if(!v) return;
+  // Picked a suggestion ("Brand — Model") from the Device or Brand field
+  const picked = scInventory().find(p => scItemLabel(p).toLowerCase() === v);
+  if(picked){ scFillFromItem(tr, picked); return; }
+  // Typed an exact brand name into Brand: fill only the empty Device/Model fields
+  if(t.classList.contains('sc-dev-brand')){
+    const p = scFindProduct(t.value, tr.querySelector('.sc-dev-model').value);
+    if(p){
+      const dev = tr.querySelector('.sc-dev-device'), model = tr.querySelector('.sc-dev-model');
+      if(!dev.value.trim() && p.category && p.category !== 'Uncategorized') dev.value = p.category;
+      if(!model.value.trim() && p.model) model.value = p.model;
+    }
+  }
+}
+
+function scOnSerialInput(tr){
+  const ser = tr.querySelector('.sc-dev-serial'), dev = tr.querySelector('.sc-dev-device'), brand = tr.querySelector('.sc-dev-brand'), model = tr.querySelector('.sc-dev-model');
+  const v = ser.value.trim().toLowerCase();
+  if(!v){ scShowSerialHint(tr, null); return; }
+  const prod = scRowProduct(tr);
+  const rec = (prod && SC_SERIALS.find(r => r.prodId === prod.id && r.serial.toLowerCase() === v))
+           || SC_SERIALS.find(r => r.serial.toLowerCase() === v);
+  scShowSerialHint(tr, rec || null);
+  if(!rec) return;
+  if(!dev.value.trim() && rec.category && rec.category !== 'Uncategorized') dev.value = rec.category;  // fill the rest of the row from the serial
+  if(!brand.value.trim() && rec.prodName) brand.value = rec.prodName;
+  if(!model.value.trim() && rec.model) model.value = rec.model;
+  // A sold unit tells us who the customer is — only fill if still empty
+  const cust = document.getElementById('sc-customer');
+  if(cust && !cust.value.trim() && String(rec.status).toLowerCase() === 'sold' && rec.soldTo && !_scEditId){
+    cust.value = rec.soldTo;
+    if(typeof scApplyCustomerPick === 'function') scApplyCustomerPick();
+  }
+}
+
+(function scWireDevicePicker(){
+  const tb = document.getElementById('sc-devices-tbody');
+  if(!tb) return;
+  tb.addEventListener('focusin', e => {
+    const t = e.target, tr = t.closest && t.closest('tr');
+    if(!tr) return;
+    if(t.classList.contains('sc-dev-device') || t.classList.contains('sc-dev-brand')) scRenderDeviceList();
+    else if(t.classList.contains('sc-dev-serial')){ scRenderSerialList(tr); scLoadSerials().then(() => scRenderSerialList(tr)); }
+  });
+  tb.addEventListener('input', e => {
+    const t = e.target, tr = t.closest && t.closest('tr');
+    if(!tr) return;
+    if(t.classList.contains('sc-dev-device') || t.classList.contains('sc-dev-brand')) scOnItemInput(tr, t);
+    else if(t.classList.contains('sc-dev-serial')){ scRenderSerialList(tr); scOnSerialInput(tr); }
+    else if((t.classList.contains('sc-dev-model') || t.classList.contains('sc-dev-brand')) && tr.querySelector('.sc-dev-serial').value) scRenderSerialList(tr);
+  });
+})();
+
+// ── Defective device rows ──
+window.scAddDeviceRow = function(d){
+  d = d || {};
+  const tbody = document.getElementById('sc-devices-tbody');
+  if(!tbody) return;
+  const tr = document.createElement('tr');
+  const cell = (cls, val, ph, extra, after) => `<td style="padding:4px;"><input type="text" class="${cls}" value="${scEsc(val)}" placeholder="${ph}" ${extra||''} style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);padding:6px 8px;color:var(--text);font-size:0.78rem;outline:none;"/>${after||''}</td>`;
+  tr.innerHTML = cell('sc-dev-device', d.device, 'e.g. CCTV Camera', 'list="sc-device-list" autocomplete="off"') + cell('sc-dev-brand', d.brand, 'Brand', 'list="sc-device-list" autocomplete="off"') + cell('sc-dev-model', d.model, 'Model')
+               + cell('sc-dev-serial', d.serial, 'Serial No.', 'list="sc-serial-list" autocomplete="off"', '<div class="sc-serial-hint" style="font-size:0.66rem;margin-top:3px;font-family:var(--mono);"></div>') + cell('sc-dev-defect', d.defect, 'What is wrong?')
+               + `<td style="padding:4px;text-align:center;"><button type="button" class="qa-btn" onclick="this.closest('tr').remove()" style="padding:3px 8px;color:#ef5350;" title="Remove">✕</button></td>`;
+  tbody.appendChild(tr);
+};
+
+window.openServiceCallModal = async function(id){
+  if(!scCanAccess()){ scDeny(); return; }
+  _scEditId = id || null;
+  const rec = id ? SC_CHUNK.find(r => r.id === id) : null;
+  if(id && !rec){ showToast('Could not locate that service call.'); return; }
+  const v = (k) => rec ? (rec[k] || '') : '';
+  const set = (el, val) => { const e = document.getElementById(el); if(e) e.value = val; };
+
+  document.getElementById('sc-modal-title').textContent = rec ? `Edit Service Call — ${rec.scId || ''}` : 'New Service Call';
+  set('sc-customer', v('customer'));
+  set('sc-address', v('siteAddress'));     set('sc-contact-person', v('contactPerson'));
+  set('sc-contact-number', v('contactNumber'));
+  set('sc-service-date', rec ? v('serviceDate') : scToday());
+  set('sc-jo-no', v('serviceJoNo'));       set('sc-handled-by', v('handledBy'));
+  set('sc-warranty', v('warranty'));       set('sc-remarks', v('remarks'));
+  set('sc-service-by', v('serviceBy'));    set('sc-service-by-date', v('serviceByDate'));
+
+  document.getElementById('sc-devices-tbody').innerHTML = '';
+  const devs = rec && Array.isArray(rec.devices) && rec.devices.length ? rec.devices : [{}];
+  devs.forEach(d => scAddDeviceRow(d));
+
+  scApplyReadOnly(rec);                         // confirmed → view-only
+  document.getElementById('modal-sc-form').classList.add('active');
+  scFillStaffList();
+  scRenderCustomerList();                       // instant if already cached
+  scLoadCustomers().then(scRenderCustomerList); // then refresh from Firestore
+  scRenderDeviceList();                         // inventory items for the Device field
+  scLoadSerials();                              // warm the serial cache (sold + in stock)
+};
+
+window.closeServiceCallModal = function(){
+  document.getElementById('modal-sc-form').classList.remove('active');
+  _scEditId = null;
+};
+
+async function scGenerateId(fb){
+  const pad = n => 'sc-' + String(n).padStart(8, '0');
+  // Highest number already in use — seeds the counter the first time and guards against a lagging counter.
+  let seed = 0;
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'serviceCalls'), fb.orderBy('scId', 'desc'), fb.limit(1)));
+    if(!snap.empty) seed = parseInt(String(snap.docs[0].data().scId || '').replace(/\D/g, '')) || 0;
+  } catch(e){ console.warn('Service call ID: could not read latest SC number:', e.code || e.message || e); }
+  try {
+    // Atomic counter: two people saving at once can never get the same number,
+    // and a number is never handed out twice even if the newest call is later deleted.
+    const ref = fb.doc(fb.db, 'counters', 'serviceCalls');
+    const next = await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists() ? (parseInt(snap.data().seq) || 0) : 0;
+      const n = Math.max(cur, seed) + 1;
+      tx.set(ref, { seq: n }, { merge: true });
+      return n;
+    });
+    return pad(next);
+  } catch(e){
+    console.error('Service call counter failed, using latest SC number + 1:', e);
+    return pad(seed + 1);
+  }
+}
+
+window.saveServiceCall = async function(){
+  if(!scCanAccess()){ scDeny(); return; }
+  const fb = window._fb;
+  if(!fb){ showToast('Firebase not available.'); return; }
+  const g = (id) => (document.getElementById(id)?.value || '').trim();
+
+  const _editing = _scEditId ? SC_CHUNK.find(r => r.id === _scEditId) : null;
+  if(_editing && scIsVoided(_editing)){ showToast('⚠ This service call has been voided and can no longer be edited.'); return; }
+  if(_editing && scVoidPending(_editing)){ showToast('⚠ A void request is pending for this service call — it is locked until reviewed.'); return; }
+  if(_editing && scIsConfirmed(_editing)){ showToast('⚠ This service call is already confirmed and can no longer be edited.'); return; }
+  const customer = g('sc-customer'), siteAddress = g('sc-address'), serviceDate = g('sc-service-date');
+  if(!customer){ showToast('⚠ Customer / Company is required.'); return; }
+  if(!siteAddress){ showToast('⚠ Site Address is required.'); return; }
+  if(!serviceDate){ showToast('⚠ Date of Service is required.'); return; }
+
+  const serviceBy = g('sc-service-by'), serviceByDate = g('sc-service-by-date');
+  if(serviceBy && !serviceByDate){ showToast('⚠ Enter the date for Service By.'); return; }
+  if(!serviceBy && serviceByDate){ showToast('⚠ Enter the name for Service By (a date was given).'); return; }
+
+  const devices = [...document.querySelectorAll('#sc-devices-tbody tr')].map(tr => ({
+    device: tr.querySelector('.sc-dev-device').value.trim(),
+    brand:  tr.querySelector('.sc-dev-brand').value.trim(),
+    model:  tr.querySelector('.sc-dev-model').value.trim(),
+    serial: tr.querySelector('.sc-dev-serial').value.trim(),
+    defect: tr.querySelector('.sc-dev-defect').value.trim()
+  })).filter(d => d.device || d.brand || d.model || d.serial || d.defect);
+
+  const actor = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff';
+  const btn = document.getElementById('sc-save-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    const payload = {
+      customer, siteAddress, serviceDate,
+      contactPerson: g('sc-contact-person'), contactNumber: g('sc-contact-number'),
+      serviceJoNo: g('sc-jo-no'), handledBy: g('sc-handled-by'), warranty: g('sc-warranty'),
+      devices, remarks: g('sc-remarks'),
+      serviceBy, serviceByDate,
+      updatedAt: fb.serverTimestamp(), updatedBy: actor
+    };
+    if(_scEditId){
+      const ref = fb.doc(fb.db, 'serviceCalls', _scEditId);
+      // Re-check the live record: someone else may have confirmed / voided it while this form was open.
+      await fb.runTransaction(fb.db, async (tx) => {
+        const snap = await tx.get(ref);
+        if(!snap.exists()) throw new Error('This service call no longer exists.');
+        const cur = snap.data();
+        if(cur.voided) throw new Error('This service call was voided while you were editing — your changes were not saved.');
+        if(cur.voidPending) throw new Error('A void request was filed for this service call while you were editing — your changes were not saved.');
+        if(cur.confirmedBy && cur.confirmedByDate) throw new Error('This service call was confirmed while you were editing — your changes were not saved.');
+        tx.update(ref, payload);
+      });
+      showToast('Service call updated.');
+    } else {
+      payload.scId = await scGenerateId(fb);
+      payload.createdAt = fb.serverTimestamp();
+      payload.createdBy = actor;
+      await fb.addDoc(fb.collection(fb.db, 'serviceCalls'), payload);
+      showToast('Service call saved — ' + payload.scId);
+    }
+    closeServiceCallModal();
+    await loadServiceCallPage();
+  } catch(err){
+    console.error('Could not save service call:', err);
+    showToast('⚠ Could not save service call: ' + (err.message || err), 6000);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Save Service Call'; }
+  }
+};
+
+// ── Confirm / finish / reopen ──
+function scToday(){ return new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10); }   // local date, not UTC
+function scIsConfirmed(r){ return !!(r && r.confirmedBy && r.confirmedByDate); }
+function scIsVoided(r){ return !!(r && r.voided === true); }
+function scVoidPending(r){ return !!(r && r.voidPending === true && r.voided !== true); }
+function scActor(){ return (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || 'Staff'; }
+
+// Confirmed calls are view-only: every field disabled, Save hidden.
+function scApplyReadOnly(rec){
+  const voided = scIsVoided(rec), pending = scVoidPending(rec), confirmed = scIsConfirmed(rec);
+  const ro = !!(rec && (voided || pending || confirmed));
+  const m = document.getElementById('modal-sc-form');
+  if(!m) return;
+  m.querySelectorAll('input, select, textarea').forEach(e => { e.disabled = ro; });
+  m.querySelectorAll('#sc-devices-tbody button').forEach(b => { b.style.display = ro ? 'none' : ''; });
+  const add = m.querySelector('button[onclick="scAddDeviceRow()"]'); if(add) add.style.display = ro ? 'none' : '';
+  const save = document.getElementById('sc-save-btn'); if(save) save.style.display = ro ? 'none' : '';
+  const cancel = m.querySelector('.btn-ghost'); if(cancel) cancel.textContent = ro ? 'Close' : 'Cancel';
+  const banner = document.getElementById('sc-readonly-banner');
+  if(banner){
+    banner.style.display = ro ? 'block' : 'none';
+    let txt = '', bg = '#e8f5e9', bd = '#81c784', fg = '#1b5e20';
+    if(voided){
+      txt = '⛔ VOIDED by ' + (rec.voidedBy || '—') + (rec.voidedAt ? ' on ' + scTsDate(rec.voidedAt) : '') + (rec.voidReason ? ' — Reason: ' + rec.voidReason : '') + '. This service call is cancelled and can no longer be changed.';
+      bg = '#ffebee'; bd = '#ef9a9a'; fg = '#b71c1c';
+    } else if(pending){
+      txt = '⏳ A void request is awaiting Super Admin approval — this service call is locked until it is reviewed.';
+      bg = '#f3e5f5'; bd = '#ce93d8'; fg = '#4a148c';
+    } else if(confirmed){
+      txt = '🔒 Confirmed by ' + rec.confirmedBy + ' on ' + scFmtDate(rec.confirmedByDate) + ' — this service call is finished and can no longer be edited.';
+    }
+    banner.textContent = ro ? txt : '';
+    banner.style.background = bg; banner.style.borderColor = bd; banner.style.color = fg;
+  }
+  if(ro){ const t = document.getElementById('sc-modal-title'); if(t) t.textContent = 'View Service Call — ' + (rec.scId || ''); }
+}
+
+let _scConfirmId = null;
+window.scOpenConfirm = function(id){
+  if(!scCanAccess()){ scDeny(); return; }
+  const r = SC_CHUNK.find(x => x.id === id);
+  if(!r){ showToast('Could not locate that service call.'); return; }
+  if(scIsVoided(r)){ showToast('This service call has been voided.'); return; }
+  if(scVoidPending(r)){ showToast('A void request is pending — this service call can\'t be confirmed.'); return; }
+  if(scIsConfirmed(r)){ showToast('This service call is already confirmed.'); return; }
+  _scConfirmId = id;
+  document.getElementById('sc-confirm-summary').innerHTML =
+    '<b>' + scEsc(r.scId || '') + '</b> — ' + scEsc(r.customer) + '<br><span style="color:var(--text-muted);">Service date ' + scFmtDate(r.serviceDate) + ' · ' + (r.devices || []).length + ' device(s)</span>';
+  document.getElementById('sc-confirm-by').value = r.contactPerson || '';
+  document.getElementById('sc-confirm-date').value = scToday();
+  document.getElementById('modal-sc-confirm').classList.add('active');
+};
+window.scCloseConfirm = function(){
+  document.getElementById('modal-sc-confirm').classList.remove('active');
+  _scConfirmId = null;
+};
+window.scSubmitConfirm = async function(){
+  if(!scCanAccess()){ scDeny(); return; }
+  const fb = window._fb;
+  if(!fb){ showToast('Firebase not available.'); return; }
+  const id = _scConfirmId;
+  const by = (document.getElementById('sc-confirm-by').value || '').trim();
+  const date = (document.getElementById('sc-confirm-date').value || '').trim();
+  if(!id){ return; }
+  if(!by){ showToast('⚠ Enter who confirmed the service (customer representative).'); return; }
+  if(!date){ showToast('⚠ Enter the date confirmed.'); return; }
+  const btn = document.getElementById('sc-confirm-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Confirming…'; }
+  try {
+    const ref = fb.doc(fb.db, 'serviceCalls', id);
+    // Transaction: if someone else confirmed it a moment ago, this aborts instead of overwriting.
+    await fb.runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if(!snap.exists()) throw new Error('This service call no longer exists.');
+      const cur = snap.data();
+      if(cur.voided || cur.voidPending) throw new Error('This service call was voided or has a pending void request.');
+      if(cur.confirmedBy && cur.confirmedByDate) throw new Error('This service call was already confirmed by someone else.');
+      tx.update(ref, {
+        confirmedBy: by, confirmedByDate: date, status: 'confirmed',
+        confirmedAt: fb.serverTimestamp(), confirmedRecordedBy: scActor(),
+        updatedAt: fb.serverTimestamp(), updatedBy: scActor()
+      });
+    });
+    showToast('Service call confirmed — marked as finished.');
+    scCloseConfirm();
+    await loadServiceCallPage();
+  } catch(err){
+    console.error('Could not confirm service call:', err);
+    showToast('⚠ Could not confirm: ' + (err.message || err), 6000);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Confirm & Finish'; }
+  }
+};
+// Super Admin only — undo a confirmation so the call can be edited again.
+window.scReopen = async function(id){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const fb = window._fb;
+  const r = SC_CHUNK.find(x => x.id === id);
+  if(!fb || !r) return;
+  if(scIsVoided(r)){ showToast('A voided service call can\'t be reopened.'); return; }
+  if(!window.confirm('Reopen ' + (r.scId || 'this service call') + '?\n\nIt will become editable again and show as Awaiting Confirmation.')) return;
+  try {
+    await fb.updateDoc(fb.doc(fb.db, 'serviceCalls', id), {
+      confirmedBy: '', confirmedByDate: '', status: 'open', confirmedAt: null,
+      reopenedAt: fb.serverTimestamp(), reopenedBy: scActor(), updatedAt: fb.serverTimestamp(), updatedBy: scActor()
+    });
+    showToast('Service call reopened.');
+    await loadServiceCallPage();
+  } catch(err){
+    console.error('Could not reopen service call:', err);
+    showToast('⚠ Could not reopen: ' + (err.message || err), 6000);
+  }
+};
+
+// ── Void (Admin requests → Super Admin approves) and Delete (Super Admin only) ──
+let _scVoidReqBusy = new Set();
+
+window.scVoid = async function(id){
+  if(!scCanAccess()){ scDeny(); return; }
+  const fb = window._fb;
+  const r = SC_CHUNK.find(x => x.id === id);
+  if(!fb || !r){ showToast('Could not locate that service call.'); return; }
+  if(scIsVoided(r)){ showToast('This service call is already voided.'); return; }
+  if(scVoidPending(r)){ showToast('A void request is already awaiting Super Admin approval.'); return; }
+  const label = r.scId || 'this service call';
+  const reason = window.prompt('Reason for voiding ' + label + ' (optional):');
+  if(reason === null) return;                                   // cancelled
+
+  if(window._currentRole === 'super'){
+    if(!window.confirm('Void ' + label + '?\n\nIt will be cancelled and can no longer be edited or confirmed.')) return;
+    try {
+      await scExecuteVoid(id, scActor(), reason.trim());
+      showToast(label + ' voided.');
+      await loadServiceCallPage();
+    } catch(err){
+      console.error('Could not void service call:', err);
+      showToast('⚠ Could not void: ' + (err.message || err), 6000);
+    }
+    return;
+  }
+
+  // Admin → file a request; nothing changes until a Super Admin approves it.
+  if(!window.confirm('Submit a request to void ' + label + '?\n\nThis needs Super Admin approval. The service call is locked until it is reviewed.')) return;
+  try {
+    await fb.addDoc(fb.collection(fb.db, 'serviceCallVoidRequests'), {
+      scFirestoreId: id, scId: r.scId || '', customer: r.customer || '',
+      reason: reason.trim(), requestedBy: scActor(),
+      requestedByUid: window._currentFirebaseUser?.uid || '',
+      requestedAt: fb.serverTimestamp(), status: 'pending'
+    });
+    try {
+      await fb.updateDoc(fb.doc(fb.db, 'serviceCalls', id), { voidPending: true, updatedAt: fb.serverTimestamp(), updatedBy: scActor() });
+    } catch(e){ console.error('Could not flag service call as void-pending:', e); }
+    showToast('Void request submitted — awaiting Super Admin approval.');
+    await loadServiceCallPage();
+  } catch(err){
+    console.error('Could not submit void request:', err);
+    showToast('⚠ Could not submit void request: ' + (err.message || err), 6000);
+  }
+};
+
+async function scExecuteVoid(id, by, reason){
+  const fb = window._fb;
+  await fb.updateDoc(fb.doc(fb.db, 'serviceCalls', id), {
+    voided: true, voidPending: false, voidedAt: fb.serverTimestamp(), voidedBy: by, voidReason: reason || '',
+    updatedAt: fb.serverTimestamp(), updatedBy: by
+  });
+}
+
+window.scDelete = async function(id){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  const fb = window._fb;
+  const r = SC_CHUNK.find(x => x.id === id);
+  if(!fb || !r){ showToast('Could not locate that service call.'); return; }
+  const label = (r.scId || 'this service call') + (r.customer ? ' — ' + r.customer : '');
+  if(!window.confirm('Permanently DELETE ' + label + '?\n\nThis cannot be undone. If you only want to cancel it, use Void instead so a record is kept.')) return;
+  try {
+    await fb.deleteDoc(fb.doc(fb.db, 'serviceCalls', id));
+    // tidy up any still-pending void request that pointed at it (best effort)
+    try {
+      const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'serviceCallVoidRequests'), fb.where('scFirestoreId', '==', id)));
+      await Promise.all(snap.docs.map(d => fb.deleteDoc(fb.doc(fb.db, 'serviceCallVoidRequests', d.id))));
+    } catch(e){ console.warn('Could not clean up void requests for deleted service call:', e); }
+    showToast((r.scId || 'Service call') + ' deleted.');
+    await loadServiceCallPage();
+  } catch(err){
+    console.error('Could not delete service call:', err);
+    showToast('⚠ Could not delete: ' + (err.message || err), 6000);
+  }
+};
+
+// ── Super Admin: review pending void requests ──
+async function scRefreshVoidBadge(){
+  const btn = document.getElementById('sc-void-requests-btn'), badge = document.getElementById('sc-void-req-badge');
+  if(!btn || !badge) return;
+  const isSA = window._currentRole === 'super';
+  btn.style.display = isSA ? 'inline-flex' : 'none';
+  if(!isSA) return;
+  const fb = window._fb;
+  if(!fb){ badge.style.display = 'none'; return; }
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'serviceCallVoidRequests'), fb.where('status', '==', 'pending')));
+    badge.textContent = snap.docs.length;
+    badge.style.display = snap.docs.length ? 'inline-block' : 'none';
+  } catch(e){ console.warn('Could not load service call void request count:', e); }
+}
+window.scOpenVoidRequests = async function(){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  document.getElementById('modal-sc-void-requests').classList.add('active');
+  await scLoadVoidRequests();
+};
+window.scCloseVoidRequests = function(){ document.getElementById('modal-sc-void-requests').classList.remove('active'); };
+
+async function scLoadVoidRequests(){
+  const tbody = document.getElementById('sc-void-req-tbody'), empty = document.getElementById('sc-void-req-empty');
+  if(!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">LOADING…</td></tr>';
+  empty.style.display = 'none';
+  const fb = window._fb;
+  if(!fb){ tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  try {
+    const snap = await fb.getDocs(fb.query(fb.collection(fb.db, 'serviceCallVoidRequests'), fb.where('status', '==', 'pending')));
+    const reqs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(!reqs.length){ tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+    tbody.innerHTML = reqs.map(q => `<tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:9px 14px;font-family:var(--mono);font-weight:700;color:var(--red);font-size:0.78rem;">${scEsc(q.scId || '—')}</td>
+      <td style="padding:9px 14px;font-size:0.8rem;">${scEsc(q.customer || '—')}</td>
+      <td style="padding:9px 14px;font-size:0.76rem;color:var(--text-muted);">${scEsc(q.reason) || '<span style="opacity:0.4;">—</span>'}</td>
+      <td style="padding:9px 14px;font-size:0.78rem;">${scEsc(q.requestedBy || '—')}</td>
+      <td style="padding:9px 14px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);">${scTsDate(q.requestedAt) || '—'}</td>
+      <td style="padding:9px 14px;text-align:center;white-space:nowrap;">
+        <button onclick="scApproveVoid('${q.id}', this)" style="background:rgba(147,51,234,0.12);border:1px solid rgba(147,51,234,0.35);color:#9333ea;padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);margin-right:4px;">APPROVE</button>
+        <button onclick="scRejectVoid('${q.id}', this)" style="background:var(--red-dim);border:1px solid var(--red-border);color:var(--red);padding:4px 10px;cursor:pointer;font-size:0.66rem;font-family:var(--mono);">REJECT</button>
+      </td></tr>`).join('');
+  } catch(e){
+    console.error('Failed to load service call void requests:', e);
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;font-family:var(--mono);font-size:0.7rem;color:#ef5350;">FAILED TO LOAD REQUESTS</td></tr>';
+  }
+}
+
+window.scApproveVoid = async function(reqId, btn){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(_scVoidReqBusy.has(reqId)){ showToast('Already processing — please wait.'); return; }
+  const fb = window._fb; if(!fb) return;
+  _scVoidReqBusy.add(reqId); if(btn) btn.disabled = true;
+  try {
+    const snap = await fb.getDoc(fb.doc(fb.db, 'serviceCallVoidRequests', reqId));
+    if(!snap.exists()){ showToast('⚠ Request no longer exists.'); return scLoadVoidRequests(); }
+    const req = snap.data();
+    if(req.status !== 'pending'){ showToast('This request has already been reviewed.'); return scLoadVoidRequests(); }
+    const by = scActor();
+    try { await scExecuteVoid(req.scFirestoreId, by, req.reason || ''); }
+    catch(e){ showToast('⚠ Could not void — the service call may have been deleted.'); console.error(e); return; }
+    await fb.updateDoc(fb.doc(fb.db, 'serviceCallVoidRequests', reqId), { status: 'approved', reviewedBy: by, reviewedAt: fb.serverTimestamp() });
+    showToast((req.scId || 'Service call') + ' voided.');
+    await scLoadVoidRequests(); scRefreshVoidBadge(); loadServiceCallPage();
+  } catch(e){
+    console.error('Failed to approve void request:', e);
+    showToast('⚠ Could not approve request: ' + (e.message || e.code || e));
+  } finally { _scVoidReqBusy.delete(reqId); if(btn) btn.disabled = false; }
+};
+
+window.scRejectVoid = async function(reqId, btn){
+  if(window._currentRole !== 'super'){ showToast('Super Admin only.'); return; }
+  if(_scVoidReqBusy.has(reqId)){ showToast('Already processing — please wait.'); return; }
+  const fb = window._fb; if(!fb) return;
+  _scVoidReqBusy.add(reqId); if(btn) btn.disabled = true;
+  try {
+    const snap = await fb.getDoc(fb.doc(fb.db, 'serviceCallVoidRequests', reqId));
+    if(!snap.exists()){ showToast('⚠ Request no longer exists.'); return scLoadVoidRequests(); }
+    const req = snap.data();
+    if(req.status !== 'pending'){ showToast('This request has already been reviewed.'); return scLoadVoidRequests(); }
+    const reason = window.prompt('Reason for rejecting this void request (optional):');
+    if(reason === null) return;
+    await fb.updateDoc(fb.doc(fb.db, 'serviceCallVoidRequests', reqId), { status: 'rejected', rejectReason: reason.trim(), reviewedBy: scActor(), reviewedAt: fb.serverTimestamp() });
+    try { await fb.updateDoc(fb.doc(fb.db, 'serviceCalls', req.scFirestoreId), { voidPending: false, updatedAt: fb.serverTimestamp(), updatedBy: scActor() }); }
+    catch(e){ console.warn('Could not clear void-pending flag:', e); }
+    showToast('Void request rejected — the service call is unlocked.');
+    await scLoadVoidRequests(); scRefreshVoidBadge(); loadServiceCallPage();
+  } catch(e){
+    console.error('Failed to reject void request:', e);
+    showToast('⚠ Could not reject request: ' + (e.message || e.code || e));
+  } finally { _scVoidReqBusy.delete(reqId); if(btn) btn.disabled = false; }
+};
+
+// ── Printable Service Report Form — same letterhead style as the RMA slip / PO / Cash Voucher ──
+window.printServiceCall = async function(id){
+  if(!scCanAccess()){ scDeny(); return; }
+  const r = SC_CHUNK.find(x => x.id === id);
+  if(!r){ showToast('Could not locate that service call.'); return; }
+  const { name: COMPANY_NAME, address: COMPANY_ADDRESS, contact: COMPANY_CONTACT } = getCompanyHeader();
+
+  // Resolve the preparer's full name (older records stored an email/display name string)
+  let preparedBy = r.createdBy || '';
+  try {
+    const cache = await buildUsersNameCache();
+    preparedBy = cache.byKey[String(preparedBy).trim().toLowerCase()] || preparedBy;
+  } catch(e){ /* keep the stored value */ }
+
+  const up = v => scEsc(String(v == null ? '' : v).toUpperCase());
+  const now = new Date();
+  const printedStr = now.toLocaleDateString('en-CA') + ' / ' +
+    now.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const scNo = scEsc(r.scId || String(r.id).slice(0,8).toUpperCase());
+  const confirmed = scIsConfirmed(r);
+  const row = (label, val, full) =>
+    `<div style="display:flex;gap:6px;${full ? 'grid-column:1/-1;' : ''}"><span style="min-width:110px;">${label}</span><span>: ${val}</span></div>`;
+
+  const th = 'border:1px solid #000;padding:5px 6px;text-align:left;font-size:0.74rem;background:#f2f2f2;';
+  const td = 'border:1px solid #000;padding:5px 6px;font-size:0.78rem;vertical-align:top;height:22px;';
+  const devs = Array.isArray(r.devices) ? r.devices.slice() : [];
+  while(devs.length < 5) devs.push({});             // blank lines so extra items can be written by hand
+  const devRows = devs.map((d, i) =>
+    `<tr><td style="${td}text-align:center;">${d.device || d.brand || d.model || d.serial || d.defect ? i + 1 : ''}</td><td style="${td}">${scEsc(d.device)}</td><td style="${td}">${scEsc(d.brand)}</td><td style="${td}">${scEsc(d.model)}</td><td style="${td}">${scEsc(d.serial)}</td><td style="${td}">${scEsc(d.defect)}</td></tr>`
+  ).join('');
+
+  const sigBlock = (label, name, date) => `
+      <div>
+        <div>${label}</div>
+        <div style="height:46px;"></div>
+        <div style="text-align:center;font-weight:700;">${up(name) || '&nbsp;'}</div>
+        <div style="border-top:1px solid #000;text-align:center;font-style:italic;font-size:0.7rem;padding-top:3px;">(Signature over Printed Name)</div>
+        <div style="margin-top:14px;text-align:center;min-height:16px;font-size:0.78rem;">${date ? scFmtDate(date) : '&nbsp;'}</div>
+        <div style="border-top:1px solid #000;text-align:center;font-style:italic;font-size:0.7rem;padding-top:3px;">Date and Time</div>
+      </div>`;
+
+  const body = `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:760px;margin:0 auto;position:relative;">
+    ${scIsVoided(r) ? '<div style="position:absolute;top:30%;left:0;right:0;text-align:center;font-size:8rem;font-weight:800;letter-spacing:0.1em;color:rgba(198,40,40,0.16);transform:rotate(-25deg);pointer-events:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;">VOID</div>' : ''}
+    <!-- Letterhead -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:8px;">
+      <div>
+        <div style="font-weight:700;font-size:1.05rem;">${COMPANY_NAME}</div>
+        <div style="font-size:0.72rem;margin-top:2px;">${COMPANY_ADDRESS}</div>
+        <div style="font-size:0.72rem;">${COMPANY_CONTACT}</div>
+      </div>
+      <div style="text-align:right;font-size:0.78rem;white-space:nowrap;">
+        <div>SC No. &nbsp;${scNo}</div>
+        <div>Date &nbsp;${printedStr}</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin:16px 0 2px;">
+      <div style="font-weight:700;font-size:1.5rem;letter-spacing:0.04em;">SERVICE REPORT FORM</div>
+      <div style="font-size:0.72rem;margin-top:2px;">PRINTED &nbsp;${printedStr}</div>
+    </div>
+    <div style="border-top:2px solid #000;margin:10px 0 16px;"></div>
+
+    <!-- Customer / service details -->
+    <div style="font-size:0.85rem;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;">
+      ${row('CUSTOMER', up(r.customer))}
+      ${row('DATE OF SERVICE', up(scFmtDate(r.serviceDate)))}
+      ${row('CONTACT PERSON', up(r.contactPerson))}
+      ${row('SERVICE JO NO.', up(r.serviceJoNo))}
+      ${row('CONTACT NUMBER', up(r.contactNumber))}
+      ${row('HANDLED BY', up(r.handledBy))}
+      ${row('WARRANTY', up(SC_WARRANTY_LABELS[r.warranty] || ''))}
+      ${row('STATUS', scIsVoided(r) ? 'VOID' : (scVoidPending(r) ? 'VOID PENDING APPROVAL' : (confirmed ? 'CONFIRMED' : 'AWAITING CONFIRMATION')))}
+      ${row('SITE ADDRESS', up(r.siteAddress), true)}
+    </div>
+
+    <!-- Defective devices -->
+    <div style="font-size:0.85rem;margin-bottom:6px;">DEFECTIVE DEVICE INFORMATION</div>
+    <table style="border-collapse:collapse;width:100%;margin-bottom:16px;page-break-inside:avoid;">
+      <thead><tr><th style="${th}width:5%;text-align:center;">#</th><th style="${th}">Device</th><th style="${th}">Brand</th><th style="${th}">Model</th><th style="${th}">Serial No.</th><th style="${th}">Defect / Problem</th></tr></thead>
+      <tbody>${devRows}</tbody>
+    </table>
+
+    <div style="font-size:0.85rem;margin-bottom:24px;">
+      <div style="min-width:110px;margin-bottom:4px;">REMARKS</div>
+      <div style="border:1px solid #000;min-height:60px;padding:8px;white-space:pre-wrap;">${scEsc(r.remarks)}</div>
+    </div>
+
+    <!-- Signatures -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;font-size:0.8rem;page-break-inside:avoid;">
+      ${sigBlock('PREPARED BY', preparedBy, '')}
+      ${sigBlock('SERVICE BY', r.serviceBy, r.serviceByDate)}
+      ${sigBlock('CONFIRMED BY', r.confirmedBy, r.confirmedByDate)}
+    </div>
+  </div>`;
+
+  const w = window.open('', '_blank', 'width=860,height=1000');
+  if(!w){ showToast('Pop-up blocked — allow pop-ups to print.'); return; }
+  const html = [
+    '<!DOCTYPE html><html>',
+    '<head><meta charset="UTF-8"><title>Service Report Form ' + scNo + '<\/title>',
+    '<style>body{padding:28px;}@media print{body{padding:0;}.no-print{display:none!important;}}<\/style><\/head>',
+    '<body>',
+    body,
+    '<div class="no-print"><button onclick="window.print()" style="display:block;margin:20px auto;padding:8px 24px;background:#1565c0;color:#fff;border:none;cursor:pointer;font-size:0.85rem;">🖨 Print<\/button><\/div>',
+    '<\/body><\/html>'
+  ].join('');
+  w.document.write(html);
+  w.document.close();
+};
 </script>
 </body>
 </html>
