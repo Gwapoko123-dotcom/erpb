@@ -569,6 +569,10 @@ window.SALES_ACTIVE_CHUNK = [];
     filterSalesLogTable();
   };
 
+  // Bridge for the Sales Summary report (printSalesSummary, in the last <script>):
+  // hands it every sale (not just the 20 on screen), reusing the cache search already built.
+  window.getAllSalesForSummary = function() { return loadAllSalesForSearch(); };
+
   // ── VOID A SALE (Admin / Super Admin only) ──
   // Marks a recorded transaction as voided (it is kept for the audit trail, but excluded
   // from revenue stats and clearly flagged). Restores any serialized stock that was
@@ -1898,6 +1902,22 @@ body.app-running #screen-app   { display:flex !important; }
 })();
 </script>
 
+<script>
+// ══════════════════════════════════════════════════════════
+//  MODALS CLOSE ONLY VIA THEIR OWN BUTTONS (✕ / Cancel / Close)
+//  Clicking the dark area around a pop-up must never dismiss it — that
+//  loses whatever was typed. Capture phase = runs before any handler on
+//  the overlay, so this also covers pop-ups added in future.
+// ══════════════════════════════════════════════════════════
+document.addEventListener('click', function (e) {
+  var t = e.target;
+  if (t && t.classList && t.classList.contains('modal-overlay')) {
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  }
+}, true);
+</script>
+
 <!-- ══════════════ LOGIN ══════════════ -->
 <div id="screen-login" class="screen active" style="flex-direction:column;">
   <div class="login-card">
@@ -1950,7 +1970,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ PRICELIST SUMMARY MODAL ══════════════ -->
-<div id="modal-pl-summary" class="modal-overlay" onclick="if(event.target===this)closePricelistSummary()">
+<div id="modal-pl-summary" class="modal-overlay">
   <div class="modal-card" style="max-width:480px;">
     <div class="modal-title">
       ◈ &nbsp;Pricelist Summary
@@ -1964,7 +1984,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ GENERATE PURCHASE ORDER MODAL ══════════════ -->
-<div id="modal-po" class="modal-overlay" onclick="if(event.target===this)closePOModal()">
+<div id="modal-po" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       ⊞ &nbsp;Generate Purchase Order
@@ -2058,7 +2078,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ PO DETAIL / REVIEW MODAL (Admin view) ══════════════ -->
-<div id="modal-void-sale" class="modal-overlay" onclick="if(event.target===this)closeVoidSaleModal()">
+<div id="modal-void-sale" class="modal-overlay">
   <div class="modal-card" style="max-width:460px;">
     <div class="modal-title">
       ⛔ &nbsp;Void Transaction
@@ -2077,7 +2097,7 @@ body.app-running #screen-app   { display:flex !important; }
   </div>
 </div>
 
-<div id="modal-po-detail" class="modal-overlay" onclick="if(event.target===this)closePODetail()">
+<div id="modal-po-detail" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       ⊞ &nbsp;Purchase Order Details
@@ -2089,7 +2109,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ PO ↔ INVENTORY RECONCILIATION MODAL ══════════════ -->
-<div id="modal-po-recon" class="modal-overlay" onclick="if(event.target===this)closePOReconciliationModal()">
+<div id="modal-po-recon" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       🔍 &nbsp;PO ⇄ Inventory Reconciliation
@@ -2103,7 +2123,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ INVENTORY — DUPLICATE MODEL+BRAND CHECK ══════════════ -->
-<div id="modal-dupe-check" class="modal-overlay" onclick="if(event.target===this)closeDuplicateCheckModal()">
+<div id="modal-dupe-check" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       ⧉ &nbsp;Duplicate Item Check
@@ -2117,7 +2137,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ SALES ↔ SERIAL RECONCILIATION MODAL ══════════════ -->
-<div id="modal-sales-serial-recon" class="modal-overlay" onclick="if(event.target===this)closeSalesSerialReconModal()">
+<div id="modal-sales-serial-recon" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       🔍 &nbsp;Sales ⇄ Serial Reconciliation
@@ -2133,7 +2153,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ VOIDED SALE ⇄ SERIAL RESTOCK RECONCILIATION MODAL ══════════════ -->
-<div id="modal-voided-serial-recon" class="modal-overlay" onclick="if(event.target===this)closeVoidedSerialReconModal()">
+<div id="modal-voided-serial-recon" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       🔍 &nbsp;Voided Sales ⇄ Serial Restock Check
@@ -2149,7 +2169,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ PO PRINT — CHOOSE APPROVED BY MODAL ══════════════ -->
-<div id="modal-po-print-approver" class="modal-overlay" onclick="if(event.target===this)closePOPrintApproverModal()">
+<div id="modal-po-print-approver" class="modal-overlay">
   <div class="modal-card" style="max-width:420px;">
     <div class="modal-title">
       🖨 &nbsp;Print Purchase Order
@@ -2171,7 +2191,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ RMA PRINT — CHOOSE RECEIVED BY MODAL ══════════════ -->
-<div id="modal-rma-print-received" class="modal-overlay" onclick="if(event.target===this)closeRMAPrintReceivedModal()">
+<div id="modal-rma-print-received" class="modal-overlay">
   <div class="modal-card" style="max-width:420px;">
     <div class="modal-title">
       🖨 &nbsp;Print RMA Slip
@@ -2664,9 +2684,9 @@ body.app-running #screen-app   { display:flex !important; }
           </div>
           <div id="tab-obhistory" class="summary-panel">
             <div class="t-wrap"><table class="htable">
-              <thead><tr><th>Date Filed</th><th>Destination</th><th>Purpose</th><th>Status</th></tr></thead>
+              <thead><tr><th>Date Filed</th><th>Purpose</th><th>Status</th></tr></thead>
               <tbody>
-                <tr><td colspan="4" style="text-align:center;padding:20px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.08em;">LOADING…</td></tr>
+                <tr><td colspan="3" style="text-align:center;padding:20px;font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);letter-spacing:0.08em;">LOADING…</td></tr>
               </tbody>
             </table></div>
           </div>
@@ -2881,7 +2901,7 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
 
         <!-- ══ SUPER ADMIN: Manual Attendance Permission Manager (Modal) ══ -->
-        <div id="modal-att-perm" class="modal-overlay" onclick="if(event.target===this)closeAttPermModal()">
+        <div id="modal-att-perm" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:560px;max-width:95vw;max-height:92vh;overflow-y:auto;">
           <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:var(--bg3);">
             <div>
@@ -2910,7 +2930,7 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
 
         <!-- ══ SUPER ADMIN: Deduction Settings (Modal) ══ -->
-        <div id="modal-att-deduct" class="modal-overlay" onclick="if(event.target===this)closeAttDeductModal()">
+        <div id="modal-att-deduct" class="modal-overlay">
         <div id="att-deduct-panel" style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:720px;max-width:95vw;max-height:92vh;overflow-y:auto;">
           <div style="padding:14px 16px 10px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:var(--bg3);">
             <div>
@@ -3062,7 +3082,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ APPROVE / REJECT MODAL ══ -->
-      <div id="modal-att-approve" class="modal-overlay" onclick="if(event.target===this)closeAttApproveModal()">
+      <div id="modal-att-approve" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid #f59e0b;width:520px;max-width:95vw;max-height:92vh;overflow-y:auto;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;color:#f59e0b;">REVIEW ATTENDANCE SUBMISSION</div>
@@ -3097,7 +3117,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ LOG ATTENDANCE MODAL ══ -->
-      <div id="modal-att-log" class="modal-overlay" onclick="if(event.target===this)closeAttLogModal()">
+      <div id="modal-att-log" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:480px;max-width:95vw;max-height:92vh;overflow-y:auto;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;">LOG ATTENDANCE</div>
@@ -3176,7 +3196,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ VIEW / EDIT ATTENDANCE RECORD MODAL ══ -->
-      <div id="modal-att-edit" class="modal-overlay" onclick="if(event.target===this)closeAttEditModal()">
+      <div id="modal-att-edit" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:440px;max-width:95vw;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;">EDIT ATTENDANCE RECORD</div>
@@ -3306,7 +3326,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ── PAYSLIP MODAL ── -->
-      <div id="modal-payslip" class="modal-overlay" onclick="if(event.target===this)closePayslipModal()">
+      <div id="modal-payslip" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--text);">PAYSLIP</div>
@@ -3320,7 +3340,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ── RUN PAYROLL MODAL ── -->
-      <div id="modal-run-payroll" class="modal-overlay" onclick="if(event.target===this)closePayrollRunModal()">
+      <div id="modal-run-payroll" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:440px;max-width:95vw;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;">RUN PAYROLL</div>
@@ -3352,7 +3372,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ── DEDUCTION RATES MODAL (superadmin only) ── -->
-      <div id="modal-payroll-rates" class="modal-overlay" onclick="if(event.target===this)closePayrollRatesModal()">
+      <div id="modal-payroll-rates" class="modal-overlay">
         <div style="background:var(--bg2);border:1px solid var(--border2);border-top:2px solid var(--red);width:460px;max-width:95vw;max-height:90vh;overflow-y:auto;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);background:var(--bg3);">
             <div style="font-family:var(--mono);font-size:0.7rem;letter-spacing:0.12em;text-transform:uppercase;">DEDUCTION RATES</div>
@@ -3578,7 +3598,7 @@ body.app-running #screen-app   { display:flex !important; }
         </div>
 
         <!-- Edit / Add Item Popup (Inventory page) -->
-        <div class="modal-overlay" id="inv-edit-form" style="display:none;" onclick="if(event.target===this) plCancelEdit('inv')">
+        <div class="modal-overlay" id="inv-edit-form" style="display:none;">
         <div class="modal-card modal-lg">
           <div class="modal-title">
             Editing Item <span id="inv-edit-id"></span>
@@ -3707,6 +3727,7 @@ body.app-running #screen-app   { display:flex !important; }
           <input type="date" id="sales-date-to" onchange="filterSalesLogTable()" style="padding: 8px 12px; font-size: 0.8rem;"/>
         </div>
         <button class="qa-btn" onclick="clearSalesDateFilter()" style="padding:8px 14px; font-size:0.72rem;">Clear Filters</button>
+        <button class="qa-btn" onclick="printSalesSummary()" title="Print a summary of the sales matching the filters above" style="padding:8px 14px; font-size:0.72rem; color:#1565c0; border-color:#1565c0;">🖨 Print Summary</button>
       </div>
     </div>
 
@@ -3823,7 +3844,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ NEW / EDIT QUOTATION MODAL ══ -->
-      <div id="modal-quotation" class="modal-overlay" onclick="if(event.target===this)closeQuotationModal()">
+      <div id="modal-quotation" class="modal-overlay">
         <div class="modal-card modal-xl" style="max-width:860px; max-height:92vh; overflow-y:auto;">
           <div class="modal-title">
             <span id="qt-modal-title">New Quotation</span>
@@ -4036,7 +4057,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ QUOTATION DETAIL / VIEW MODAL ══ -->
-      <div id="modal-qt-view" class="modal-overlay" onclick="if(event.target===this)closeQuotationViewModal()">
+      <div id="modal-qt-view" class="modal-overlay">
         <div class="modal-card modal-xl" style="max-width:760px; max-height:92vh; overflow-y:auto;">
           <div class="modal-title">
             Quotation <span id="qt-view-id" style="color:var(--red);"></span>
@@ -4057,7 +4078,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ QUOTATION CONFIRM / VOID MODAL (replaces native confirm/prompt) ══ -->
-      <div id="modal-qt-confirm" class="modal-overlay" onclick="if(event.target===this)closeQtConfirmModal()">
+      <div id="modal-qt-confirm" class="modal-overlay">
         <div class="modal-card" style="max-width:440px;">
           <div class="modal-title">
             <span id="qt-confirm-title">Confirm Action</span>
@@ -4156,7 +4177,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ NEW / EDIT LEAD MODAL ══ -->
-      <div id="modal-lead" class="modal-overlay" onclick="if(event.target===this)closeLeadModal()">
+      <div id="modal-lead" class="modal-overlay">
         <div class="modal-card" style="max-width:680px;max-height:92vh;overflow-y:auto;">
           <div class="modal-title">
             <span id="lead-modal-title">New Lead</span>
@@ -4225,7 +4246,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ VIEW LEAD MODAL ══ -->
-      <div id="modal-lead-view" class="modal-overlay" onclick="if(event.target===this)closeLeadViewModal()">
+      <div id="modal-lead-view" class="modal-overlay">
         <div class="modal-card" style="width:680px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:28px 32px;">
           <div class="modal-title">
             <span id="lead-view-title">Lead Details</span>
@@ -4339,7 +4360,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ INSTALLATION JOB FORM MODAL ══ -->
-      <div id="modal-inst-form" class="modal-overlay" onclick="if(event.target===this)closeInstallationModal()">
+      <div id="modal-inst-form" class="modal-overlay">
         <div class="modal-card modal-xl" style="max-width:700px; max-height:92vh; overflow-y:auto;">
           <div class="modal-title">
             <span id="inst-modal-title">New Installation Job</span>
@@ -4430,7 +4451,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ INSTALLATION JOB VIEW MODAL ══ -->
-      <div id="modal-inst-view" class="modal-overlay" onclick="if(event.target===this)closeInstallationViewModal()">
+      <div id="modal-inst-view" class="modal-overlay">
         <div class="modal-card modal-xl" style="max-width:680px; max-height:92vh; overflow-y:auto;">
           <div class="modal-title">
             Installation Job <span id="inst-view-id" style="color:var(--red);"></span>
@@ -4597,7 +4618,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- ══ SERVICE CALL FORM MODAL ══ -->
-      <div id="modal-sc-form" class="modal-overlay" onclick="if(event.target===this)closeServiceCallModal()">
+      <div id="modal-sc-form" class="modal-overlay">
         <div class="modal-card modal-xl" style="max-width:820px; max-height:92vh; overflow-y:auto;">
           <div class="modal-title">
             <span id="sc-modal-title">New Service Call</span>
@@ -4662,7 +4683,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- Confirm service call (marks it finished + locks it) -->
-      <div id="modal-sc-confirm" class="modal-overlay" onclick="if(event.target===this)scCloseConfirm()">
+      <div id="modal-sc-confirm" class="modal-overlay">
         <div class="modal-card" style="max-width:460px;">
           <div class="modal-title">
             <span>Confirm Service Call</span>
@@ -4682,7 +4703,7 @@ body.app-running #screen-app   { display:flex !important; }
       </div>
 
       <!-- Service call void requests (Super Admin review) -->
-      <div id="modal-sc-void-requests" class="modal-overlay" onclick="if(event.target===this)scCloseVoidRequests()">
+      <div id="modal-sc-void-requests" class="modal-overlay">
         <div class="modal-card" style="max-width:860px; width:96vw; padding:0; overflow:hidden; max-height:85vh; display:flex; flex-direction:column;">
           <div style="background:var(--bg3); border-bottom:1px solid var(--border2); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
             <div style="display:flex; align-items:center; gap:10px;">
@@ -4992,10 +5013,7 @@ body.app-running #screen-app   { display:flex !important; }
                 <th>Ref #</th>
                 <th>Date Filed</th>
                 <th>OB Type</th>
-                <th>Destination</th>
                 <th>Purpose</th>
-                <th>Transport</th>
-                <th>Est. Budget (₱)</th>
                 <th style="text-align:center;">Status</th>
                 <th style="text-align:center;">Actions</th>
               </tr></thead>
@@ -5011,7 +5029,7 @@ body.app-running #screen-app   { display:flex !important; }
             <span id="ob-pending-count" style="margin-left:8px;background:var(--red);color:#fff;padding:2px 8px;font-family:var(--mono);font-size:0.62rem;display:none;"></span>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-            <input type="text" id="ob-search" placeholder="Search by name, destination or ref#…" style="flex:1;min-width:180px;" oninput="renderOBAdminTable()"/>
+            <input type="text" id="ob-search" placeholder="Search by name, purpose or ref#…" style="flex:1;min-width:180px;" oninput="renderOBAdminTable()"/>
             <select id="ob-status-filter" onchange="renderOBAdminTable()" style="min-width:140px;">
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
@@ -5026,10 +5044,7 @@ body.app-running #screen-app   { display:flex !important; }
                 <th>Date Filed</th>
                 <th>Applicant</th>
                 <th>OB Type</th>
-                <th>Destination</th>
                 <th>Purpose</th>
-                <th>Transport</th>
-                <th>Est. Budget (₱)</th>
                 <th style="text-align:center;">Status</th>
                 <th style="text-align:center;">Actions</th>
               </tr></thead>
@@ -5341,7 +5356,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ RMA ITEM MODAL ══════════════ -->
-<div id="modal-rma" class="modal-overlay" onclick="if(event.target===this)closeRMAModal()">
+<div id="modal-rma" class="modal-overlay">
   <div class="modal-card" style="max-width:480px;">
     <div class="modal-title">
       <span id="rma-modal-title">Add RMA Item</span>
@@ -5402,7 +5417,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ INCOMPLETE ITEM — COMPLETE (SERIAL PICKER) MODAL ══════════════ -->
-<div id="modal-ii-serial" class="modal-overlay" style="z-index:10050;" onclick="if(event.target===this)closeIICompletePicker()">
+<div id="modal-ii-serial" class="modal-overlay" style="z-index:10050;">
   <div class="modal-card" style="max-width:520px;">
     <div class="modal-title">
       🏷 &nbsp;Complete Item — Select Serial Number(s)
@@ -5499,7 +5514,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ GENERATE SALES MODAL ══════════════ -->
-<div id="modal-sales" class="modal-overlay" onclick="if(event.target===this)closeSalesModal()">
+<div id="modal-sales" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       ₱ &nbsp;Generate Sales Transaction
@@ -5692,7 +5707,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ LINE-ITEM SERIAL PICKER MODAL ══════════════ -->
-<div id="modal-line-serial" class="modal-overlay" style="z-index:10050;" onclick="if(event.target===this)closeLineSerialPicker()">
+<div id="modal-line-serial" class="modal-overlay" style="z-index:10050;">
   <div class="modal-card" style="max-width:520px;">
     <div class="modal-title">
       🏷 &nbsp;Select Serial Number(s)
@@ -5716,7 +5731,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ DASHBOARD SERIAL SEARCH — RESULTS MODAL ══════════════ -->
-<div id="modal-dash-serial-results" class="modal-overlay" style="z-index:10050;" onclick="if(event.target===this)closeDashSerialResultsModal()">
+<div id="modal-dash-serial-results" class="modal-overlay" style="z-index:10050;">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       🔍 &nbsp;Serial Number Lookup Results
@@ -5727,7 +5742,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ TOTAL SALES PER STAFF — SUPER ADMIN ONLY ══════════════ -->
-<div id="modal-sales-per-staff" class="modal-overlay" onclick="if(event.target===this)closeSalesPerStaffModal()">
+<div id="modal-sales-per-staff" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title" style="display:flex;align-items:center;gap:10px;">
       👤 &nbsp;Total Sales — Per Staff
@@ -5780,7 +5795,7 @@ body.app-running #screen-app   { display:flex !important; }
   </div>
 </div>
 
-<div id="modal-pricelist" class="modal-overlay" onclick="if(event.target===this)closePricelistModal()">
+<div id="modal-pricelist" class="modal-overlay">
   <div class="modal-card modal-xl">
     <div class="modal-title">
       ◈ &nbsp;Product Pricelist
@@ -5860,7 +5875,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ APPLY REIMBURSEMENT MODAL ══════════════ -->
-<div id="modal-reimb" class="modal-overlay" onclick="if(event.target===this)closeReimbModal()">
+<div id="modal-reimb" class="modal-overlay">
   <div class="modal-card" style="max-width:580px;">
     <div class="modal-title">
       ↩ &nbsp;Apply Reimbursement
@@ -5966,7 +5981,7 @@ body.app-running #screen-app   { display:flex !important; }
 <!-- queue as a Replenish record (adding immediately to "For                -->
 <!-- Acknowledgement"), and can be voided by the Super Admin at any time     -->
 <!-- from the table below.                                                  -->
-<div id="modal-ack" class="modal-overlay" onclick="if(event.target===this)closeAckModal()">
+<div id="modal-ack" class="modal-overlay">
   <div class="modal-card" style="max-width:400px;">
     <div class="modal-title">
       ↩ &nbsp;Add Acknowledgement
@@ -6011,7 +6026,7 @@ body.app-running #screen-app   { display:flex !important; }
 <!-- affects either branch's Running Balance once a Super Admin approves it. -->
 <!-- Voidable/approvable individually from the admin table like any other    -->
 <!-- reimbursement record (the linked leg follows automatically).           -->
-<div id="modal-transfer" class="modal-overlay" onclick="if(event.target===this)closeTransferModal()">
+<div id="modal-transfer" class="modal-overlay">
   <div class="modal-card" style="max-width:420px;">
     <div class="modal-title">
       ⇄ &nbsp;Transfer Funds Between Branches
@@ -6047,7 +6062,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ LEAVE APPLICATION MODAL ══════════════ -->
-<div id="modal-leave" class="modal-overlay" onclick="if(event.target===this)closeLeaveModal()">
+<div id="modal-leave" class="modal-overlay">
   <div class="modal-card" style="max-width:600px;">
     <div class="modal-title">
       □ &nbsp;<span id="leave-modal-title-text">File Leave Application</span>
@@ -6138,7 +6153,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ LEAVE DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
-<div id="modal-leave-detail" class="modal-overlay" onclick="if(event.target===this)closeLeaveDetail()">
+<div id="modal-leave-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:580px;">
     <div class="modal-title">
       □ &nbsp;Leave Application Details
@@ -6158,7 +6173,7 @@ body.app-running #screen-app   { display:flex !important; }
 
 
 <!-- ══════════════ WOH FILE MODAL ══════════════ -->
-<div id="modal-woh" class="modal-overlay" onclick="if(event.target===this)closeWOHModal()">
+<div id="modal-woh" class="modal-overlay">
   <div class="modal-card" style="max-width:640px;">
     <div class="modal-title">
       ◎ &nbsp;File Work on Holiday Request
@@ -6238,7 +6253,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ WOH DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
-<div id="modal-woh-detail" class="modal-overlay" onclick="if(event.target===this)closeWOHDetail()">
+<div id="modal-woh-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:620px;">
     <div class="modal-title">
       ◎ &nbsp;Work on Holiday Request Details
@@ -6257,7 +6272,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ OB FILE MODAL ══════════════ -->
-<div id="modal-ob" class="modal-overlay" onclick="if(event.target===this)closeOBModal()">
+<div id="modal-ob" class="modal-overlay">
   <div class="modal-card" style="max-width:660px;">
     <div class="modal-title">
       ✦ &nbsp;File Official Business Trip Request
@@ -6279,32 +6294,9 @@ body.app-running #screen-app   { display:flex !important; }
             style="background:var(--bg3);opacity:0.85;cursor:default;font-family:var(--mono);font-size:0.8rem;"/>
         </div>
         <div class="field" style="grid-column:1/-1;">
-          <label>Destination *</label>
-          <input type="text" id="ob-destination" placeholder="e.g. Makati City, Metro Manila — Client Office HQ"/>
-        </div>
-        <div class="field" style="grid-column:1/-1;">
           <label>Purpose / Business Objective *</label>
           <textarea id="ob-purpose" rows="3" placeholder="Describe the specific business purpose, objectives, and expected outcomes of this trip…"
             style="width:100%;background:var(--bg);border:1px solid var(--border2);padding:9px 12px;color:var(--text);font-size:0.85rem;resize:vertical;outline:none;font-family:inherit;"></textarea>
-        </div>
-        <div class="field">
-          <label>Mode of Transport *</label>
-          <select id="ob-transport" onchange="toggleOBCustomTransport()">
-            <option value="">— Select —</option>
-            <option value="Company Vehicle">Company Vehicle</option>
-            <option value="Personal Vehicle (w/ fuel reimbursement)">Personal Vehicle (w/ fuel reimbursement)</option>
-            <option value="Airline">Airline</option>
-            <option value="Bus / Coach">Bus / Coach</option>
-            <option value="Grab / Taxi">Grab / Taxi</option>
-            <option value="Custom">Custom</option>
-          </select>
-          <input type="text" id="ob-transport-custom"
-            placeholder="Enter custom mode of transport"
-            style="display:none;margin-top:6px;"/>
-        </div>
-        <div class="field">
-          <label>Estimated Budget (₱) *</label>
-          <input type="number" id="ob-budget" min="0" step="0.01" placeholder="0.00"/>
         </div>
         <div class="field" style="grid-column:1/-1;">
           <label>OB Log Type *</label>
@@ -6346,7 +6338,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ OB DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
-<div id="modal-ob-detail" class="modal-overlay" onclick="if(event.target===this)closeOBDetail()">
+<div id="modal-ob-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:640px;">
     <div class="modal-title">
       ✦ &nbsp;Official Business Trip — Request Details
@@ -6365,7 +6357,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ FILE CASH ADVANCE MODAL ══════════════ -->
-<div id="modal-ca" class="modal-overlay" onclick="if(event.target===this)closeCAModal()">
+<div id="modal-ca" class="modal-overlay">
   <div class="modal-card" style="max-width:600px;">
     <div class="modal-title">
       ✦ &nbsp;File Cash Advance Request
@@ -6433,7 +6425,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ CASH ADVANCE DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
-<div id="modal-ca-detail" class="modal-overlay" onclick="if(event.target===this)closeCADetail()">
+<div id="modal-ca-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:600px;">
     <div class="modal-title">
       ✦ &nbsp;Cash Advance — Request Details
@@ -6459,7 +6451,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ OT FILE MODAL ══════════════ -->
-<div id="modal-ot" class="modal-overlay" onclick="if(event.target===this)closeOTModal()">
+<div id="modal-ot" class="modal-overlay">
   <div class="modal-card" style="max-width:620px;">
     <div class="modal-title">
       ⊕ &nbsp;File Overtime Request
@@ -6527,7 +6519,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ OT DETAIL / REVIEW MODAL (Super Admin) ══════════════ -->
-<div id="modal-ot-detail" class="modal-overlay" onclick="if(event.target===this)closeOTDetail()">
+<div id="modal-ot-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:600px;">
     <div class="modal-title">
       ⊕ &nbsp;Overtime Request Details
@@ -6546,7 +6538,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ REIMB DETAIL / REVIEW MODAL (Super Admin only) ══════════════ -->
-<div id="modal-reimb-detail" class="modal-overlay" onclick="if(event.target===this)closeReimbDetail()">
+<div id="modal-reimb-detail" class="modal-overlay">
   <div class="modal-card" style="max-width:560px;">
     <div class="modal-title">
       ↩ &nbsp;Reimbursement Request Details
@@ -6558,7 +6550,7 @@ body.app-running #screen-app   { display:flex !important; }
 </div>
 
 <!-- ══════════════ REIMB RUNNING BALANCE AUDIT / BREAKDOWN MODAL ══════════════ -->
-<div id="modal-reimb-balance-audit" class="modal-overlay" onclick="if(event.target===this)closeReimbBalanceAudit()">
+<div id="modal-reimb-balance-audit" class="modal-overlay">
   <div class="modal-card" style="max-width:820px;">
     <div class="modal-title">
       ↩ &nbsp;Running Balance — Breakdown
@@ -16672,7 +16664,7 @@ async function submitCreateAccount(){
 </script>
 
 <!-- ══ EDIT MY PROFILE MODAL ══ -->
-<div class="modal-overlay" id="modal-edit-myprofile" onclick="if(event.target===this)closeMyProfileEdit()">
+<div class="modal-overlay" id="modal-edit-myprofile">
   <div class="modal" style="max-width:660px;width:95vw;max-height:92vh;overflow-y:auto;">
     <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);position:sticky;top:0;background:var(--bg2);z-index:1;border-radius:12px 12px 0 0;">
       <span class="modal-title">EDIT PROFILE</span>
@@ -16772,7 +16764,7 @@ async function submitCreateAccount(){
 </div>
 
 <!-- ══ EMPLOYEE PROFILE VIEW MODAL (Super Admin) ══ -->
-<div class="modal-overlay" id="modal-emp-profile" onclick="if(event.target===this)closeEmpProfile()">
+<div class="modal-overlay" id="modal-emp-profile">
   <div class="modal" style="max-width:820px;width:96vw;max-height:94vh;overflow-y:auto;display:flex;flex-direction:column;">
 
     <!-- ── Sticky header ── -->
@@ -17098,7 +17090,7 @@ async function submitCreateAccount(){
   </div>
 </div>
 <!-- ══ EDIT EMPLOYEE MODAL (Super Admin = all fields; Admin = other info for users only) ══ -->
-<div class="modal-overlay" id="modal-edit-emp" onclick="if(event.target===this)closeEmpEdit()">
+<div class="modal-overlay" id="modal-edit-emp">
   <div class="modal" style="max-width:660px;width:95vw;max-height:92vh;overflow-y:auto;">
     <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border2);position:sticky;top:0;background:var(--bg2);z-index:1;border-radius:12px 12px 0 0;">
       <span class="modal-title">EDIT EMPLOYEE</span>
@@ -17991,7 +17983,7 @@ async function deletePromo(promoId, uid) {
 </script>
 
 <!-- ══ ADD / EDIT PROMOTION MODAL ══ -->
-<div class="modal-overlay" id="modal-promo" onclick="if(event.target===this)closePromoModal()">
+<div class="modal-overlay" id="modal-promo">
   <div class="modal-card" style="max-width:560px;width:95vw;">
     <div class="modal-title">
       <span id="promo-modal-title">ADD PROMOTION RECORD</span>
@@ -19870,7 +19862,7 @@ async function rejectDeleteRequest(reqId, btn) {
 </script>
 
 <!-- ══ ADD / EDIT BRANCH MODAL ══ -->
-<div class="modal-overlay" id="modal-branch" onclick="if(event.target===this)closeBranchModal()">
+<div class="modal-overlay" id="modal-branch">
   <div class="modal-card" style="max-width:560px;width:95vw;">
     <div class="modal-title">
       <span id="branch-modal-title">ADD BRANCH</span>
@@ -20605,7 +20597,7 @@ function syncHRBranchSelects() {
 </script>
 
 <!-- ══ INVENTORY ITEM DETAIL MODAL ══ -->
-<div class="modal-overlay" id="modal-inv-detail" onclick="if(event.target===this)closeInvDetail()">
+<div class="modal-overlay" id="modal-inv-detail">
   <div class="modal-card" style="max-width:820px;width:95vw;padding:0;overflow:hidden;">
 
     <!-- Header -->
@@ -20768,7 +20760,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ STOCK TRANSFER REQUESTS (APPROVAL) MODAL ══ -->
-<div class="modal-overlay" id="modal-transfer-requests" onclick="if(event.target===this)closeTransferRequestsModal()">
+<div class="modal-overlay" id="modal-transfer-requests">
   <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -20813,7 +20805,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ NEW / EDIT STOCK TRANSFER MODAL ══ -->
-<div class="modal-overlay" id="modal-stock-transfer" onclick="if(event.target===this)closeStockTransferModal()">
+<div class="modal-overlay" id="modal-stock-transfer">
   <div class="modal-card" style="max-width:820px;width:96vw;padding:0;overflow:hidden;max-height:90vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -20863,7 +20855,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ STOCK TRANSFER DETAIL / PRINT PREVIEW MODAL ══ -->
-<div class="modal-overlay" id="modal-st-detail" onclick="if(event.target===this)closeStockTransferDetail()">
+<div class="modal-overlay" id="modal-st-detail">
   <div class="modal-card" style="max-width:760px;width:96vw;padding:0;overflow:hidden;max-height:90vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -20883,7 +20875,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ STOCK DELETE REQUESTS (APPROVAL) MODAL — SUPER ADMIN ONLY ══ -->
-<div class="modal-overlay" id="modal-delete-requests" onclick="if(event.target===this)closeDeleteRequestsModal()">
+<div class="modal-overlay" id="modal-delete-requests">
   <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -20927,7 +20919,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══════════════ PO VOID REQUESTS MODAL ══════════════ -->
-<div class="modal-overlay" id="modal-lead-requests" onclick="if(event.target===this)closeLeadRequestsModal()">
+<div class="modal-overlay" id="modal-lead-requests">
   <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -20970,7 +20962,7 @@ function syncHRBranchSelects() {
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-po-void-requests" onclick="if(event.target===this)closePOVoidRequestsModal()">
+<div class="modal-overlay" id="modal-po-void-requests">
   <div class="modal-card" style="max-width:900px;width:96vw;padding:0;overflow:hidden;max-height:85vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -21015,7 +21007,7 @@ function syncHRBranchSelects() {
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-view-receipt" onclick="if(event.target===this)closeViewReceiptModal()">
+<div class="modal-overlay" id="modal-view-receipt">
   <div class="modal-card" style="max-width:760px;width:95vw;padding:0;overflow:hidden;">
 
     <!-- Header -->
@@ -21047,7 +21039,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ EDIT PAYMENT DATES MODAL ══ -->
-<div class="modal-overlay" id="modal-payment-dates" onclick="if(event.target===this)closeEditPaymentDates()" style="z-index:10001;">
+<div class="modal-overlay" id="modal-payment-dates" style="z-index:10001;">
   <div class="modal-card" style="max-width:440px;width:95vw;padding:0;overflow:hidden;">
     <div style="background:var(--bg3);border-bottom:1px solid var(--border2);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -21080,7 +21072,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ EDIT SURVEY BY MODAL ══ -->
-<div class="modal-overlay" id="modal-edit-survey" onclick="if(event.target===this)closeEditSaleSurvey()" style="z-index:10001;">
+<div class="modal-overlay" id="modal-edit-survey" style="z-index:10001;">
   <div class="modal-card" style="max-width:440px;width:95vw;padding:0;overflow:hidden;">
     <div style="background:var(--bg3);border-bottom:1px solid var(--border2);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -21111,7 +21103,7 @@ function syncHRBranchSelects() {
 </div>
 
 <!-- ══ SERIAL NUMBERS DETAIL PAGE (MODAL) ══ -->
-<div class="modal-overlay" id="modal-serial-detail" onclick="if(event.target===this)closeSerialDetailPage()" style="z-index:10000;">
+<div class="modal-overlay" id="modal-serial-detail" style="z-index:10000;">
   <div class="modal-card" style="max-width:820px;width:96vw;padding:0;overflow:hidden;max-height:90vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
@@ -28328,11 +28320,10 @@ async function loadMyAppHistoryTabs() {
     // ── OB tab ──
     if (tOB) {
       if (!myOB.length) {
-        tOB.innerHTML = emptyRow(4, 'NO OFFICIAL BUSINESS RECORDS YET');
+        tOB.innerHTML = emptyRow(3, 'NO OFFICIAL BUSINESS RECORDS YET');
       } else {
         tOB.innerHTML = myOB.slice(0, 8).map(o => `<tr>
           <td>${formatFiledDate(o.createdAt)}</td>
-          <td>${o.destination || '—'}</td>
           <td>${o.purpose || '—'}</td>
           <td>${statusBadgeFor(o.status)}</td>
         </tr>`).join('');
@@ -29913,12 +29904,10 @@ window.fixOBRefNumbers = async function() {
 
 window.openOBModal = function() {
   // Reset form
-  ['ob-destination','ob-purpose','ob-transport','ob-budget','ob-log-type','ob-transport-custom'].forEach(id => {
+  ['ob-purpose','ob-log-type'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  const obCustomTransportEl = document.getElementById('ob-transport-custom');
-  if (obCustomTransportEl) obCustomTransportEl.style.display = 'none';
 
   // Auto-populate ref and today date
   const refEl = document.getElementById('ob-ref-no');
@@ -29951,19 +29940,6 @@ function fmtOBTime(t) {
   return `${h12}:${String(m).padStart(2,'0')} ${period}`;
 }
 
-// ── Toggle custom transport input based on Mode of Transport select ──
-function toggleOBCustomTransport(){
-  const sel = document.getElementById('ob-transport');
-  const customEl = document.getElementById('ob-transport-custom');
-  if(!sel || !customEl) return;
-  if(sel.value === 'Custom'){
-    customEl.style.display = 'block';
-  } else {
-    customEl.style.display = 'none';
-    customEl.value = '';
-  }
-}
-
 // ── Submit OB Request ──
 window.submitOB = async function() {
   const fb   = window._fb;
@@ -29971,13 +29947,7 @@ window.submitOB = async function() {
   if (!fb || !user) { showToast('Not authenticated.'); return; }
 
   const refNo         = document.getElementById('ob-ref-no')?.value.trim();
-  const destination   = document.getElementById('ob-destination')?.value.trim();
   const purpose       = document.getElementById('ob-purpose')?.value.trim();
-  let transport       = document.getElementById('ob-transport')?.value;
-  if (transport === 'Custom') {
-    transport = document.getElementById('ob-transport-custom')?.value.trim();
-  }
-  const budgetRaw     = document.getElementById('ob-budget')?.value;
   const obLogType     = document.getElementById('ob-log-type')?.value || '';
 
   const setMsg = (msg, red) => {
@@ -29986,16 +29956,8 @@ window.submitOB = async function() {
   };
 
   // Validation
-  if (!destination) { setMsg('⚠ Destination is required.', true); return; }
   if (!purpose)     { setMsg('⚠ Business purpose / objective is required.', true); return; }
-  if (!transport)   {
-    const rawTransport = document.getElementById('ob-transport')?.value;
-    setMsg(rawTransport === 'Custom' ? '⚠ Please enter the custom mode of transport.' : '⚠ Mode of transport is required.', true);
-    return;
-  }
   if (!obLogType)   { setMsg('⚠ Please select OB Out or OB In.', true); return; }
-  const budget = parseFloat(budgetRaw);
-  if (!budgetRaw || isNaN(budget) || budget < 0) { setMsg('⚠ A valid estimated budget is required.', true); return; }
 
   const btn = document.getElementById('ob-submit-btn');
   btn.disabled = true; btn.textContent = 'Submitting…';
@@ -30018,10 +29980,7 @@ window.submitOB = async function() {
       applicantUid:   user.uid,
       applicantName:  realName,
       applicantEmail: user.email,
-      destination,
       purpose,
-      transport,
-      budget,
       logType:       obLogType,
       loggedAt:      fb.serverTimestamp(),
       status:        'pending',
@@ -30040,11 +29999,8 @@ window.submitOB = async function() {
     document.getElementById('ob-form-wrap').style.display = 'none';
     document.getElementById('ob-confirm-body').innerHTML = `
       <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${refNo}</span></div>
-      <div class="leave-detail-row"><span class="ldr-label">Destination</span><span class="ldr-val" style="font-weight:600;">${destination}</span></div>
       <div class="leave-detail-row"><span class="ldr-label">${obLogType}</span><span class="ldr-val" style="font-family:var(--mono);">${new Date(payload.loggedAt.seconds * 1000).toLocaleString('en-PH', { dateStyle:'medium', timeStyle:'medium' })}</span></div>
-      <div class="leave-detail-row"><span class="ldr-label">Purpose</span><span class="ldr-val">${purpose}</span></div>
-      <div class="leave-detail-row"><span class="ldr-label">Transport</span><span class="ldr-val">${transport}</span></div>
-      <div class="leave-detail-row" style="border:none;"><span class="ldr-label">Est. Budget</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;color:var(--red);">₱${budget.toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+      <div class="leave-detail-row" style="border:none;"><span class="ldr-label">Purpose</span><span class="ldr-val">${purpose}</span></div>
       <div style="margin-top:14px;padding:10px 12px;background:rgba(21,101,192,0.06);border:1px solid rgba(21,101,192,0.2);font-family:var(--mono);font-size:0.72rem;color:var(--red);letter-spacing:0.04em;">
         STATUS: PENDING SUPER ADMIN APPROVAL &nbsp;·&nbsp; You will be notified once reviewed.
       </div>
@@ -30057,7 +30013,7 @@ window.submitOB = async function() {
     if (window._currentRole === 'super' || window._currentRole === 'admin') renderOBAdminTable();
     updateOBNavBadge();
 
-    const actText = `OB Request filed — ${realName} → ${destination} [${refNo}]`;
+    const actText = `OB Request filed — ${realName} (${obLogType}) [${refNo}]`;
     prependActivity({ text: actText, green: false });
     if (typeof logActivity === 'function') logActivity({ text: actText, type: 'ob_filed', green: false });
     showToast('Official Business Trip request submitted ✓');
@@ -30123,18 +30079,15 @@ function printOBSlip(id){
   w.document.write('<div style="display:grid;grid-template-columns:150px 1fr 150px 1fr;row-gap:12px;column-gap:14px;font-size:13px;margin-bottom:24px;">');
   w.document.write('<div style="font-weight:700;">Employee:</div><div style="font-weight:700;">'+applicant+'</div>');
   w.document.write('<div style="font-weight:700;">Log Type:</div><div>'+(ob.logType||'—')+'</div>');
-  w.document.write('<div style="font-weight:700;">Destination:</div><div>'+(ob.destination||'—')+'</div>');
-  w.document.write('<div style="font-weight:700;">Mode of Transport:</div><div>'+(ob.transport||'—')+'</div>');
   w.document.write('<div style="font-weight:700;">Status:</div><div>'+(ob.status||'pending').toUpperCase()+'</div>');
   w.document.write('</div>');
 
   // Purpose / particulars table
   w.document.write('<table><thead>');
-  w.document.write('<tr><th colspan="2" style="text-align:center;background:#000;font-size:13px;letter-spacing:2px;">PURPOSE / OBJECTIVE OF TRAVEL</th></tr>');
+  w.document.write('<tr><th style="text-align:center;background:#000;font-size:13px;letter-spacing:2px;">PURPOSE / OBJECTIVE OF TRAVEL</th></tr>');
   w.document.write('</thead><tbody>');
   w.document.write('<tr>');
   w.document.write('<td style="border:1px solid #ccc;padding:10px 12px;">'+(ob.purpose||'-')+'</td>');
-  w.document.write('<td style="border:1px solid #ccc;padding:10px 12px;text-align:right;font-weight:700;width:170px;">Est. Budget<br>&#8369;'+fmt2b(ob.budget||0)+'</td>');
   w.document.write('</tr>');
   w.document.write('</tbody></table>');
 
@@ -30185,10 +30138,7 @@ function renderMyOBTable() {
         <td style="font-family:var(--mono);font-weight:600;color:var(--red);">${ob.refNo||'—'}</td>
         <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${filed}</td>
         <td style="text-align:center;">${ob.logType ? `<span style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.05em;padding:2px 8px;border-radius:3px;white-space:nowrap;${ob.logType==='OB Out' ? 'background:rgba(255,167,38,0.12);color:#ffa726;border:1px solid rgba(255,167,38,0.35);' : 'background:var(--green-dim);color:var(--green);border:1px solid rgba(22,163,74,0.3);'}">${ob.logType}</span>` : '<span style="opacity:0.35;">—</span>'}</td>
-        <td style="font-weight:500;">${ob.destination||'—'}</td>
         <td style="font-size:0.78rem;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ob.purpose||''}">${ob.purpose||'—'}</td>
-        <td>${ob.transport||'—'}</td>
-        <td style="font-family:var(--mono);text-align:right;font-weight:600;">₱${fmt(ob.budget||0)}</td>
         <td style="text-align:center;"><span class="leave-status ${ob.status||'pending'}">${ob.status||'pending'}</span></td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn btn-ghost" onclick="printOBSlip('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0 4px 0 0;">🖨 Print</button>
@@ -30211,7 +30161,6 @@ function renderOBAdminTable() {
     if (stFilter && ob.status !== stFilter) return false;
     if (search) {
       return (obApplicantName(ob)||'').toLowerCase().includes(search)
-          || (ob.destination||'').toLowerCase().includes(search)
           || (ob.refNo||'').toLowerCase().includes(search)
           || (ob.purpose||'').toLowerCase().includes(search);
     }
@@ -30236,10 +30185,7 @@ function renderOBAdminTable() {
         <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);">${filed}</td>
         <td style="font-weight:600;">${obApplicantName(ob)}</td>
         <td style="text-align:center;">${ob.logType ? `<span style="font-family:var(--mono);font-size:0.65rem;letter-spacing:0.05em;padding:2px 8px;border-radius:3px;white-space:nowrap;${ob.logType==='OB Out' ? 'background:rgba(255,167,38,0.12);color:#ffa726;border:1px solid rgba(255,167,38,0.35);' : 'background:var(--green-dim);color:var(--green);border:1px solid rgba(22,163,74,0.3);'}">${ob.logType}</span>` : '<span style="opacity:0.35;">—</span>'}</td>
-        <td style="font-weight:500;">${ob.destination||'—'}</td>
         <td style="font-size:0.78rem;color:var(--text-muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ob.purpose||''}">${ob.purpose||'—'}</td>
-        <td>${ob.transport||'—'}</td>
-        <td style="font-family:var(--mono);text-align:right;font-weight:600;">₱${fmt(ob.budget||0)}</td>
         <td style="text-align:center;"><span class="leave-status ${ob.status||'pending'}">${ob.status||'pending'}</span></td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn btn-ghost" onclick="printOBSlip('${ob.id}')" style="padding:3px 10px;font-size:0.7rem;margin:0 4px 0 0;">🖨 Print</button>
@@ -30302,13 +30248,10 @@ function _renderOBDetailModal(ob, canReview) {
     <div class="leave-detail-row"><span class="ldr-label">Reference No.</span><span class="ldr-val" style="font-family:var(--mono);color:var(--red);font-weight:700;">${ob.refNo||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Applicant</span><span class="ldr-val" style="font-weight:600;">${obApplicantName(ob)}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Email</span><span class="ldr-val">${ob.applicantEmail||'—'}</span></div>
-    <div class="leave-detail-row"><span class="ldr-label">Destination</span><span class="ldr-val" style="font-weight:600;">${ob.destination||'—'}</span></div>
     ${ob.logType ? `
     <div class="leave-detail-row"><span class="ldr-label">Log Type</span><span class="ldr-val" style="font-weight:600;">${ob.logType}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Time Submitted</span><span class="ldr-val" style="font-family:var(--mono);">${ob.loggedAt?.seconds ? new Date(ob.loggedAt.seconds * 1000).toLocaleString('en-PH', { dateStyle:'medium', timeStyle:'medium' }) : '—'}</span></div>` : ''}
-    <div class="leave-detail-row"><span class="ldr-label">Mode of Transport</span><span class="ldr-val">${ob.transport||'—'}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Purpose</span><span class="ldr-val">${ob.purpose||'—'}</span></div>
-    <div class="leave-detail-row"><span class="ldr-label">Estimated Budget</span><span class="ldr-val" style="font-family:var(--mono);font-weight:700;font-size:1rem;color:var(--red);">₱${fmt(ob.budget||0)}</span></div>
     <div class="leave-detail-row"><span class="ldr-label">Date Filed</span><span class="ldr-val">${filed}</span></div>
     <div class="leave-detail-row" style="border:none;"><span class="ldr-label">Status</span><span class="ldr-val"><span class="leave-status ${ob.status||'pending'}">${ob.status||'pending'}</span></span></div>
     ${ob.rejectReason ? `<div class="leave-detail-row" style="border:none;padding-top:0;"><span class="ldr-label">Rejection Reason</span><span class="ldr-val" style="color:#ef5350;font-style:italic;">${ob.rejectReason}</span></div>` : ''}
@@ -30380,7 +30323,7 @@ window.approveOB = async function(id) {
     renderOBAdminTable();
     updateOBNavBadge();
     const ob = ALL_OB.find(o => o.id === id);
-    const actText = `OB approved — ${ob?.applicantName||''} → ${ob?.destination||''} [${ob?.refNo||id}]`;
+    const actText = `OB approved — ${ob?.applicantName||''} [${ob?.refNo||id}]`;
     prependActivity({ text: actText, green: true });
     if (typeof logActivity === 'function') logActivity({ text: actText, type: 'ob_approved', green: true });
     showToast('Official Business Trip request approved ✓');
@@ -30412,7 +30355,7 @@ window.rejectOB = async function(id) {
     renderOBAdminTable();
     updateOBNavBadge();
     const ob = ALL_OB.find(o => o.id === id);
-    const actText = `OB rejected — ${ob?.applicantName||''} → ${ob?.destination||''} [${ob?.refNo||id}]`;
+    const actText = `OB rejected — ${ob?.applicantName||''} [${ob?.refNo||id}]`;
     prependActivity({ text: actText, green: false });
     if (typeof logActivity === 'function') logActivity({ text: actText, type: 'ob_rejected', green: false });
     showToast('Official Business Trip request rejected.');
@@ -33457,6 +33400,211 @@ window.scRejectVoid = async function(reqId, btn){
     console.error('Failed to reject void request:', e);
     showToast('⚠ Could not reject request: ' + (e.message || e.code || e));
   } finally { _scVoidReqBusy.delete(reqId); if(btn) btn.disabled = false; }
+};
+
+// ══════════════════════════════════════════════════════════
+//  SALES SUMMARY REPORT (printable)
+//  Summarises every sale matching the Sales page filters (search / payment
+//  status / date range), across ALL sales — not just the 20 rows on screen.
+//  Same letterhead style as the other printed forms. Voided sales are listed
+//  but never counted in the totals.
+// ══════════════════════════════════════════════════════════
+window.printSalesSummary = async function(){
+  const money = n => Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const peso  = n => '&#8369;' + money(n);
+  const esc   = v => String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const r2    = n => Math.round((Number(n) || 0) * 100) / 100;
+  const dShort = d => d.toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' });
+
+  if(typeof window.getAllSalesForSummary !== 'function'){ showToast('Sales data is not ready yet — open the Sales page first.'); return; }
+  let all;
+  try { all = await window.getAllSalesForSummary(); }
+  catch(e){ console.error('Sales summary: could not load sales', e); showToast('⚠ Could not load sales for the summary.', 5000); return; }
+
+  // ── Apply the same filters as the Sales table ──
+  const val = id => (document.getElementById(id) || {}).value || '';
+  const search = val('sales-search-input').toLowerCase().trim().replace(/^#/, '');
+  const from = val('sales-date-from'), to = val('sales-date-to'), pay = val('sales-payment-filter');
+  const fromDate = from ? new Date(from + 'T00:00:00') : null;
+  const toDate   = to   ? new Date(to   + 'T23:59:59.999') : null;
+  const has = (v) => String(v == null ? '' : v).toLowerCase().includes(search);
+  const pending = tx => !tx.voided && r2(tx.amountPaid) < r2(tx.total);
+
+  let rows = all.filter(tx => {
+    if(search && !(has(tx.txId) || has(tx.customer) || has(tx.branch) || has(tx.soldBy) || has(tx.firestoreId))) return false;
+    const d = tx.createdAt;
+    if(fromDate || toDate){
+      if(!(d instanceof Date) || isNaN(d)) return false;
+      if(fromDate && d < fromDate) return false;
+      if(toDate && d > toDate) return false;
+    }
+    if(pay === 'unpaid' && !pending(tx)) return false;
+    if(pay === 'paid' && pending(tx)) return false;
+    return true;
+  }).sort((a, b) => a.createdAt - b.createdAt);            // oldest → newest reads naturally in a report
+
+  if(!rows.length){ showToast('No sales match the current filters — nothing to summarise.'); return; }
+
+  // ── Totals (voided sales excluded) ──
+  const live = rows.filter(t => !t.voided), voided = rows.filter(t => t.voided);
+  const sum = (arr, f) => arr.reduce((a, t) => a + f(t), 0);
+  const paidOf = t => Math.min(Number(t.amountPaid) || 0, Number(t.total) || 0);
+  const balOf  = t => Math.max(0, r2((Number(t.total) || 0) - (Number(t.amountPaid) || 0)));
+  const T = { n: live.length, sub: sum(live, t => t.subtotal), vat: sum(live, t => t.vat), total: sum(live, t => t.total), paid: sum(live, paidOf), bal: sum(live, balOf) };
+
+  const groupBy = (arr, keyFn) => {
+    const m = new Map();
+    arr.forEach(t => {
+      const k = (keyFn(t) || '').toString().trim() || 'Unspecified';
+      const g = m.get(k) || { k, n: 0, total: 0, paid: 0, bal: 0 };
+      g.n++; g.total += Number(t.total) || 0; g.paid += paidOf(t); g.bal += balOf(t);
+      m.set(k, g);
+    });
+    return [...m.values()].sort((a, b) => b.total - a.total);
+  };
+  const byMethod = groupBy(live, t => (t.raw && t.raw.paymentMethod) || '');
+  const byBranch = groupBy(live, t => t.branch);
+  const byStaff  = groupBy(live, t => t.soldBy);
+
+  // ── Header / "prepared by" ──
+  const { name: COMPANY_NAME, address: COMPANY_ADDRESS, contact: COMPANY_CONTACT } = getCompanyHeader();
+  let preparedBy = '';
+  try {
+    const cache = await buildUsersNameCache();
+    const u = window._currentFirebaseUser || {};
+    preparedBy = (u.uid && cache.byUid[u.uid]) || cache.byKey[String(u.email || '').toLowerCase()] || u.displayName || u.email || '';
+  } catch(e){ preparedBy = (window._currentFirebaseUser && (window._currentFirebaseUser.displayName || window._currentFirebaseUser.email)) || ''; }
+
+  const now = new Date();
+  const printedStr = now.toLocaleDateString('en-CA') + ' / ' + now.toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const dates = rows.map(t => t.createdAt).filter(d => d instanceof Date && !isNaN(d));
+  const period = (fromDate || toDate)
+    ? ((fromDate ? dShort(fromDate) : 'Beginning') + ' – ' + (toDate ? dShort(toDate) : 'Present'))
+    : (dates.length ? dShort(dates[0]) + ' – ' + dShort(dates[dates.length - 1]) + ' (all dates)' : 'All dates');
+  const payLabel = pay === 'unpaid' ? 'PENDING BALANCE ONLY' : pay === 'paid' ? 'FULLY PAID ONLY' : 'ALL';
+  const refNo = 'SS-' + now.toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+
+  // ── Building blocks ──
+  const th = 'border:1px solid #000;padding:5px 6px;font-size:0.7rem;background:#f2f2f2;';
+  const td = 'border:1px solid #000;padding:4px 6px;font-size:0.72rem;vertical-align:top;';
+  const R = 'text-align:right;white-space:nowrap;';
+  const detail = (label, v) => `<div style="display:flex;gap:6px;"><span style="min-width:120px;">${label}</span><span>: ${v}</span></div>`;
+  const groupTable = (title, firstCol, arr) => `
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:0.8rem;font-weight:700;margin-bottom:4px;">${title}</div>
+      <table style="border-collapse:collapse;width:100%;">
+        <thead><tr><th style="${th}text-align:left;">${firstCol}</th><th style="${th}${R}">Txns</th><th style="${th}${R}">Sales</th><th style="${th}${R}">Collected</th><th style="${th}${R}">Balance</th></tr></thead>
+        <tbody>${arr.map(g => `<tr><td style="${td}">${esc(g.k)}</td><td style="${td}${R}">${g.n}</td><td style="${td}${R}">${money(g.total)}</td><td style="${td}${R}">${money(g.paid)}</td><td style="${td}${R}">${money(g.bal)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td style="${td}font-weight:700;">TOTAL</td><td style="${td}${R}font-weight:700;">${T.n}</td><td style="${td}${R}font-weight:700;">${money(T.total)}</td><td style="${td}${R}font-weight:700;">${money(T.paid)}</td><td style="${td}${R}font-weight:700;">${money(T.bal)}</td></tr></tfoot>
+      </table>
+    </div>`;
+  const statusOf = t => t.voided ? 'VOID' : (pending(t) ? 'PENDING' : 'PAID');
+  const txRows = rows.map(t => {
+    const v = t.voided, st = v ? 'text-decoration:line-through;color:#777;' : '';
+    return `<tr>
+      <td style="${td}${st}">${esc(t.createdAt instanceof Date && !isNaN(t.createdAt) ? dShort(t.createdAt) : '—')}</td>
+      <td style="${td}${st}">#${esc(t.txId)}</td>
+      <td style="${td}${st}">${esc(t.customer)}</td>
+      <td style="${td}${st}">${esc(t.branch)}</td>
+      <td style="${td}${st}">${esc(t.soldBy)}</td>
+      <td style="${td}${st}">${esc((t.raw && t.raw.paymentMethod) || '—')}</td>
+      <td style="${td}${R}${st}">${money(t.total)}</td>
+      <td style="${td}${R}${st}">${v ? '—' : money(paidOf(t))}</td>
+      <td style="${td}${R}${st}">${v ? '—' : money(balOf(t))}</td>
+      <td style="${td}text-align:center;font-weight:700;">${statusOf(t)}</td>
+    </tr>`;
+  }).join('');
+  const sigBlock = (label, name) => `
+      <div>
+        <div>${label}</div>
+        <div style="height:42px;"></div>
+        <div style="text-align:center;font-weight:700;">${esc(String(name || '').toUpperCase()) || '&nbsp;'}</div>
+        <div style="border-top:1px solid #000;text-align:center;font-style:italic;font-size:0.7rem;padding-top:3px;">(Signature over Printed Name)</div>
+        <div style="margin-top:12px;min-height:14px;">&nbsp;</div>
+        <div style="border-top:1px solid #000;text-align:center;font-style:italic;font-size:0.7rem;padding-top:3px;">Date and Time</div>
+      </div>`;
+
+  const body = `
+  <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:1040px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:8px;">
+      <div>
+        <div style="font-weight:700;font-size:1.05rem;">${COMPANY_NAME}</div>
+        <div style="font-size:0.72rem;margin-top:2px;">${COMPANY_ADDRESS}</div>
+        <div style="font-size:0.72rem;">${COMPANY_CONTACT}</div>
+      </div>
+      <div style="text-align:right;font-size:0.78rem;white-space:nowrap;">
+        <div>Report No. &nbsp;${refNo}</div>
+        <div>Date &nbsp;${printedStr}</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin:12px 0 2px;">
+      <div style="font-weight:700;font-size:1.5rem;letter-spacing:0.04em;">SALES SUMMARY REPORT</div>
+      <div style="font-size:0.72rem;margin-top:2px;">PRINTED &nbsp;${printedStr}</div>
+    </div>
+    <div style="border-top:2px solid #000;margin:10px 0 14px;"></div>
+
+    <div style="font-size:0.82rem;margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;">
+      ${detail('PERIOD', esc(period))}
+      ${detail('PAYMENT STATUS', payLabel)}
+      ${detail('SEARCH', search ? esc(val('sales-search-input').trim()) : '—')}
+      ${detail('TRANSACTIONS', rows.length + (voided.length ? ' (' + voided.length + ' voided, not counted)' : ''))}
+    </div>
+
+    <!-- Overall totals -->
+    <table style="border-collapse:collapse;width:100%;margin-bottom:16px;page-break-inside:avoid;">
+      <thead><tr>
+        <th style="${th}${R}">Transactions</th><th style="${th}${R}">Subtotal</th><th style="${th}${R}">VAT</th>
+        <th style="${th}${R}">Gross Sales</th><th style="${th}${R}">Collected</th><th style="${th}${R}">Outstanding Balance</th><th style="${th}${R}">Avg. / Sale</th>
+      </tr></thead>
+      <tbody><tr style="font-weight:700;">
+        <td style="${td}${R}font-size:0.85rem;">${T.n}</td><td style="${td}${R}font-size:0.85rem;">${peso(T.sub)}</td><td style="${td}${R}font-size:0.85rem;">${peso(T.vat)}</td>
+        <td style="${td}${R}font-size:0.85rem;">${peso(T.total)}</td><td style="${td}${R}font-size:0.85rem;">${peso(T.paid)}</td><td style="${td}${R}font-size:0.85rem;">${peso(T.bal)}</td><td style="${td}${R}font-size:0.85rem;">${peso(T.n ? T.total / T.n : 0)}</td>
+      </tr></tbody>
+    </table>
+
+    <div style="display:flex;gap:18px;margin-bottom:16px;page-break-inside:avoid;">
+      ${groupTable('BY PAYMENT METHOD', 'Method', byMethod)}
+      ${groupTable('BY BRANCH', 'Branch', byBranch)}
+    </div>
+    <div style="margin-bottom:16px;page-break-inside:avoid;">
+      ${groupTable('BY SOLD BY (SALES STAFF)', 'Staff', byStaff)}
+    </div>
+
+    <div style="font-size:0.8rem;font-weight:700;margin-bottom:4px;">TRANSACTION LIST</div>
+    <table style="border-collapse:collapse;width:100%;margin-bottom:8px;">
+      <thead><tr>
+        <th style="${th}text-align:left;">Date</th><th style="${th}text-align:left;">TXN ID</th><th style="${th}text-align:left;">Customer</th>
+        <th style="${th}text-align:left;">Branch</th><th style="${th}text-align:left;">Sold By</th><th style="${th}text-align:left;">Payment</th>
+        <th style="${th}${R}">Total</th><th style="${th}${R}">Paid</th><th style="${th}${R}">Balance</th><th style="${th}text-align:center;">Status</th>
+      </tr></thead>
+      <tbody>${txRows}</tbody>
+      <tfoot><tr>
+        <td colspan="6" style="${td}font-weight:700;text-align:right;">TOTAL (excluding voided)</td>
+        <td style="${td}${R}font-weight:700;">${money(T.total)}</td><td style="${td}${R}font-weight:700;">${money(T.paid)}</td><td style="${td}${R}font-weight:700;">${money(T.bal)}</td><td style="${td}"></td>
+      </tr></tfoot>
+    </table>
+    ${voided.length ? '<div style="font-size:0.7rem;color:#555;margin-bottom:14px;">Voided transactions are shown struck through and are not included in any total above.</div>' : '<div style="margin-bottom:14px;"></div>'}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;font-size:0.8rem;page-break-inside:avoid;margin-top:20px;">
+      ${sigBlock('PREPARED BY', preparedBy)}
+      ${sigBlock('CHECKED BY', '')}
+      ${sigBlock('APPROVED BY', '')}
+    </div>
+  </div>`;
+
+  const w = window.open('', '_blank', 'width=1100,height=900');
+  if(!w){ showToast('Pop-up blocked — allow pop-ups to print.'); return; }
+  const html = [
+    '<!DOCTYPE html><html>',
+    '<head><meta charset="UTF-8"><title>Sales Summary Report ' + refNo + '<\/title>',
+    '<style>@page{size:A4 landscape;margin:12mm;}body{padding:24px;}thead{display:table-header-group;}tr{page-break-inside:avoid;}@media print{body{padding:0;}.no-print{display:none!important;}}<\/style><\/head>',
+    '<body>',
+    body,
+    '<div class="no-print"><button onclick="window.print()" style="display:block;margin:20px auto;padding:8px 24px;background:#1565c0;color:#fff;border:none;cursor:pointer;font-size:0.85rem;">🖨 Print<\/button><\/div>',
+    '<\/body><\/html>'
+  ].join('');
+  w.document.write(html);
+  w.document.close();
 };
 
 // ── Printable Service Report Form — same letterhead style as the RMA slip / PO / Cash Voucher ──
